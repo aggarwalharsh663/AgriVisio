@@ -135,3 +135,37 @@ def test_uploaded_photo_detects_dense_grains_across_the_full_frame(
     assert batch["summary"]["total_grains"] >= 200
     assert batch["summary"]["total_grains"] == len(batch["grains"])
     assert any(grain["center"][0] > 970 for grain in batch["grains"])
+
+
+def test_uploaded_photo_counts_dense_167_grain_sample(tmp_path, monkeypatch):
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    monkeypatch.setattr(main, "DATA_DIR", data_dir)
+    monkeypatch.setattr(main, "DATABASE_PATH", tmp_path / "agriscan.sqlite3")
+    image = np.full((720, 1200, 3), 24, dtype=np.uint8)
+    rng = np.random.default_rng(73)
+    for index in range(167):
+        row, column = divmod(index, 21)
+        center = (30 + column * 45 + (row % 2) * 22, 20 + row * 24)
+        angle = int(rng.integers(0, 180))
+        cv2.ellipse(image, center, (24, 7), angle, 0, 360, (228, 222, 200), -1)
+
+    success, encoded = cv2.imencode(".jpg", image)
+    assert success
+
+    with TestClient(main.app) as client:
+        response = client.post(
+            "/api/scan/upload",
+            data={
+                "sample_name": "167-grain sample",
+                "variety": "Basmati",
+                "lighting": "daylight",
+            },
+            files={"image": ("167-grains.jpg", encoded.tobytes(), "image/jpeg")},
+        )
+
+    assert response.status_code == 200, response.text
+    batch = response.json()
+    detected = batch["summary"]["total_grains"]
+    assert detected == len(batch["grains"])
+    assert 160 <= detected <= 170
