@@ -75,7 +75,9 @@
 	function setLoading(loading) {
 		scanButton.disabled = loading;
 		scanButton.classList.toggle("is-loading", loading);
-		scanButton.querySelector(".button-label").textContent = loading ? "Analyzing simulated sample…" : scanSource.value === "upload" ? "Analyze photo" : "Pour rice and scan";
+		scanButton.querySelector(".button-label").textContent = loading
+			? scanSource.value === "upload" ? "Analyzing uploaded photo…" : "Analyzing simulated sample…"
+			: scanSource.value === "upload" ? "Analyze photo" : "Pour rice and scan";
 		form.setAttribute("aria-busy", String(loading));
 	}
 
@@ -551,8 +553,25 @@
 		if (uploadingPhoto && photo.size > 10 * 1024 * 1024) { showFriendlyError("Choose a photo that is 10 MB or smaller."); return; }
 		setLoading(true);
 		try {
-			await runChamberEffects();
-			const response = await fetch("/api/scan", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+			let endpoint = "/api/scan";
+			let requestOptions;
+			if (uploadingPhoto) {
+				const formData = new FormData();
+				formData.append("image", photo);
+				formData.append("sample_name", payload.sample_name);
+				formData.append("variety", payload.variety);
+				formData.append("lighting", payload.lighting);
+				endpoint = "/api/scan/upload";
+				requestOptions = { method: "POST", body: formData };
+			} else {
+				await runChamberEffects();
+				requestOptions = {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify(payload),
+				};
+			}
+			const response = await fetch(endpoint, requestOptions);
 			const result = await response.json().catch(() => ({}));
 			if (!response.ok) throw new Error(typeof result.detail === "string" ? result.detail : "The scan service could not complete the request.");
 			if (!result.images || !result.calibration || !result.summary || !Array.isArray(result.grains)) throw new Error("The scan returned incomplete results. Please try again.");
