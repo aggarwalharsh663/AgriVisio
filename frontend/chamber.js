@@ -275,6 +275,31 @@
     );
   }
 
+  function drawFlatLens(x, z, y, radius) {
+    const points = [];
+    const segments = 24;
+    for (let step = 0; step < segments; step += 1) {
+      const angle = step / segments * Math.PI * 2;
+      points.push([
+        x + Math.cos(angle) * radius,
+        y,
+        z + Math.sin(angle) * radius,
+      ]);
+    }
+
+    drawPolygon(points, "#10212a", "#82969e");
+    drawLine(points.concat([points[0]]), "#9db0b6", 1);
+    const innerPoints = points.map(function (point) {
+      return [
+        x + (point[0] - x) * 0.72,
+        y - 0.002,
+        z + (point[2] - z) * 0.72,
+      ];
+    });
+    drawPolygon(innerPoints, "#24475a", "#527283");
+    drawLine(innerPoints.concat([innerPoints[0]]), "#527283", 0.8);
+  }
+
   function drawTripodPhone(box) {
     const mastX = box.right + 0.5;
     const mastZ = 0;
@@ -326,54 +351,40 @@
       "#c0c8ca",
       2,
     );
-    const cameraBumpCenter = { x: -0.32, z: -0.48 };
-    // The camera housing hangs below the phone and into the roof aperture.
-    const cameraY = phone.y - 0.5;
+    // Rectangular camera island with three glass lenses on its underside.
+    const island = { left: -0.7, right: -0.02, back: -0.93, front: -0.18 };
+    const islandTopY = phone.y - 0.045;
+    const islandBottomY = phone.y - 0.22;
+    const islandTop = [
+      [island.left, islandTopY, island.back],
+      [island.right, islandTopY, island.back],
+      [island.right, islandTopY, island.front],
+      [island.left, islandTopY, island.front],
+    ];
+    const islandBottom = [
+      [island.left, islandBottomY, island.back],
+      [island.right, islandBottomY, island.back],
+      [island.right, islandBottomY, island.front],
+      [island.left, islandBottomY, island.front],
+    ];
+    drawPolygon(islandTop, "#202629", "#77868c");
     drawLine(
-      [[cameraBumpCenter.x, phone.y, cameraBumpCenter.z],
-        [cameraBumpCenter.x, cameraY, cameraBumpCenter.z]],
-      "#111719",
-      8,
+      islandTop.concat([islandTop[0]]),
+      "#9ba5a9",
+      2,
     );
-    const cameraBump = project(cameraBumpCenter.x, cameraY, cameraBumpCenter.z);
-    context.fillStyle = "#202629";
-    context.beginPath();
-    context.roundRect(cameraBump.x - 22, cameraBump.y - 18, 44, 36, 10);
-    context.fill();
-    context.strokeStyle = "#687277";
-    context.lineWidth = 1.5;
-    context.stroke();
-    [[-8, -6], [8, -6], [-8, 8]].forEach(function (offset) {
-      context.beginPath();
-      context.arc(cameraBump.x + offset[0], cameraBump.y + offset[1], 5.2, 0, Math.PI * 2);
-      context.fillStyle = "#101517";
-      context.fill();
-      context.strokeStyle = "#77868c";
-      context.lineWidth = 1;
-      context.stroke();
-      context.beginPath();
-      context.arc(cameraBump.x + offset[0], cameraBump.y + offset[1], 3.2, 0, Math.PI * 2);
-      context.fillStyle = "#537c90";
-      context.fill();
-      context.strokeStyle = "#9baeb5";
-      context.lineWidth = 0.8;
-      context.stroke();
-      context.beginPath();
-      context.arc(cameraBump.x + offset[0] - 1, cameraBump.y + offset[1] - 1, 1.2, 0, Math.PI * 2);
-      context.fillStyle = "#c8e4ef";
-      context.fill();
+    for (let corner = 0; corner < islandTop.length; corner += 1) {
+      drawLine([islandTop[corner], islandBottom[corner]], "#111719", 2);
+    }
+    drawPolygon(islandBottom, "#161c1f", "#9baeb5");
+    drawLine(islandBottom.concat([islandBottom[0]]), "#9baeb5", 1.5);
+
+    [[-0.54, -0.77], [-0.18, -0.77], [-0.54, -0.36]].forEach(function (position) {
+      drawFlatLens(position[0], position[1], islandBottomY - 0.003, 0.075);
     });
-    context.beginPath();
-    context.arc(cameraBump.x + 8, cameraBump.y + 8, 2.5, 0, Math.PI * 2);
-    context.fillStyle = "#d9c982";
-    context.fill();
-    context.beginPath();
-    context.roundRect(cameraBump.x + 11, cameraBump.y - 4, 4, 8, 2);
-    context.fillStyle = "#e9e5d3";
-    context.fill();
     drawLine([[0.34, phone.y, -0.58], [0.34, phone.y, -0.28]], "#c0c8ca", 2);
     drawLine([[0.34, phone.y, 0.02], [0.34, phone.y, 0.3]], "#c0c8ca", 2);
-    return project(cameraBumpCenter.x, cameraY, cameraBumpCenter.z);
+    return project(-0.36, islandBottomY - 0.02, -0.57);
   }
 
   function addRice() {
