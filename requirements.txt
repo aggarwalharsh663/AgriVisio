@@ -1,0 +1,13 @@
+fastapi
+uvicorn
+opencv-python
+numpy
+pandas
+scikit-learn
+joblib
+matplotlib
+python-multipart
+qrcode
+pillow
+pytest
+httpx
