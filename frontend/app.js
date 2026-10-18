@@ -84,11 +84,7 @@
 		if (!chamber) return;
 		const lighting = document.querySelector("#lighting").value;
 		if (typeof chamber.setLighting === "function") chamber.setLighting(lighting);
-		if (typeof chamber.pourRice === "function") {
-			await new Promise((resolve, reject) => {
-				try { chamber.pourRice(resolve); } catch (error) { reject(error); }
-			});
-		}
+		if (typeof chamber.pourRice === "function") chamber.pourRice();
 		if (typeof chamber.cameraFlash === "function") {
 			await new Promise((resolve) => chamber.cameraFlash(resolve));
 		}
@@ -555,18 +551,8 @@
 		if (uploadingPhoto && photo.size > 10 * 1024 * 1024) { showFriendlyError("Choose a photo that is 10 MB or smaller."); return; }
 		setLoading(true);
 		try {
-			let response;
-			if (uploadingPhoto) {
-				const formData = new FormData();
-				formData.append("image", photo);
-				formData.append("sample_name", payload.sample_name);
-				formData.append("variety", payload.variety);
-				formData.append("lighting", payload.lighting);
-				response = await fetch("/api/scan/upload", { method: "POST", body: formData });
-			} else {
-				await runChamberEffects();
-				response = await fetch("/api/scan", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-			}
+			await runChamberEffects();
+			const response = await fetch("/api/scan", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
 			const result = await response.json().catch(() => ({}));
 			if (!response.ok) throw new Error(typeof result.detail === "string" ? result.detail : "The scan service could not complete the request.");
 			if (!result.images || !result.calibration || !result.summary || !Array.isArray(result.grains)) throw new Error("The scan returned incomplete results. Please try again.");
