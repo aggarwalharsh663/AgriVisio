@@ -104,6 +104,28 @@ def test_match_distance_is_strictly_less_than_twenty_pixels(tmp_path):
     assert result["width_mae_mm"] is None
 
 
+def test_compare_maximizes_one_to_one_matches_before_nearest_distance(tmp_path):
+    path = _write_truth(
+        tmp_path,
+        [
+            _truth("good", [0, 0]),
+            _truth("good", [25, 0]),
+        ],
+    )
+
+    result = compare(
+        path,
+        [
+            _prediction("good", [8, 0]),
+            _prediction("good", [-10, 0]),
+        ],
+    )
+
+    assert result["accuracy"] == 1
+    assert result["missed_grains"] == 0
+    assert result["extra_grains"] == 0
+
+
 def test_empty_grain_lists_return_zero_accuracy_and_empty_matrix(tmp_path):
     path = _write_truth(tmp_path, [])
 
