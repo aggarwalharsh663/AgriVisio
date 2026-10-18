@@ -26,7 +26,7 @@ _batch_lock = threading.Lock()
 
 class ScanRequest(BaseModel):
     lighting: str = Field(pattern="^(ring_light|daylight|tube_light)$")
-    n_grains: int = Field(ge=8, le=100)
+    n_grains: int = Field(ge=8, le=200)
     seed: int | None = None
     sample_name: str = Field(min_length=1, max_length=80)
     variety: str = Field(min_length=1, max_length=80)
@@ -51,20 +51,33 @@ def _mock_grains(ground_truth: dict) -> list[dict]:
         length = float(source["true_length_mm"])
         width = float(source["true_width_mm"])
         label = source["label"]
+        low_confidence = source["id"] % 37 == 0
+        center_x, center_y = source["center"]
+        box_width = length / 0.12
+        box_height = width / 0.12
         grains.append(
             {
                 "id": source["id"],
-                "bbox": [0, 0, 0, 0],
-                "center": source["center"],
+                "bbox": [
+                    round(center_x - box_width / 2, 1),
+                    round(center_y - box_height / 2, 1),
+                    round(box_width, 1),
+                    round(box_height, 1),
+                ],
+                "center": [center_x, center_y],
                 "length_mm": length,
                 "width_mm": width,
                 "lb_ratio": round(length / max(width, 0.01), 2),
                 "mean_rgb": [228, 221, 201],
                 "chalk_fraction": 0.65 if label == "chalky" else 0.04,
                 "label": label,
-                "confidence": 0.96,
-                "low_confidence": False,
-                "reason": "Simulated reference label used in mock mode.",
+                "confidence": 0.58 if low_confidence else 0.96,
+                "low_confidence": low_confidence,
+                "reason": (
+                    "Simulated edge case; manual review recommended."
+                    if low_confidence
+                    else "Simulated reference label used in mock mode."
+                ),
             }
         )
     return grains
@@ -111,6 +124,8 @@ def _make_batch(request: ScanRequest) -> dict:
         label: sum(grain["label"] == label for grain in grains)
         for label in labels
     }
+    low_confidence_count = sum(bool(grain["low_confidence"]) for grain in grains)
+    mean_confidence = mean(grain["confidence"] for grain in grains) if grains else 0
     total = len(grains)
     lengths = [grain["length_mm"] for grain in grains]
     widths = [grain["width_mm"] for grain in grains]
@@ -147,8 +162,8 @@ def _make_batch(request: ScanRequest) -> dict:
             "mean_lb_ratio": round(mean(g["lb_ratio"] for g in grains), 2)
             if grains
             else 0,
-            "mean_confidence": 0.96 if grains else 0,
-            "low_confidence_count": 0,
+            "mean_confidence": round(mean_confidence, 3),
+            "low_confidence_count": low_confidence_count,
         },
         "fingerprint": {
             "vector": vector,
@@ -164,8 +179,11 @@ def _make_batch(request: ScanRequest) -> dict:
                 for label in labels
             },
             "confusion_matrix": [
-                [counts[label] if row == column else 0 for column, _ in enumerate(labels)]
-                for row, label in enumerate(labels)
+                [
+                    counts[label] if row == column else 0
+                    for column, label in enumerate(labels)
+                ]
+                for row, _ in enumerate(labels)
             ],
             "labels": labels,
             "length_mae_mm": 0,
