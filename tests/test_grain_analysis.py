@@ -4,7 +4,12 @@ import cv2
 import numpy as np
 import pytest
 
-from backend.grain_analysis import measure_grain, segment_grains
+from backend.grain_analysis import (
+    FEATURE_NAMES,
+    analyze_image,
+    measure_grain,
+    segment_grains,
+)
 from backend.simulator import LIGHTING, make_scene
 
 
@@ -84,3 +89,55 @@ def test_segmentation_ignores_card_and_tiny_blobs_and_sorts_left_to_right():
 
     assert len(contours) == 3
     assert centers_x == sorted(centers_x)
+
+
+def test_analyze_image_returns_contract_keys_and_saves_annotation(tmp_path):
+    scene = make_scene(seed=17, n_grains=24, lighting="ring_light", out_dir=str(tmp_path))
+    result = analyze_image(scene["photo_path"], scene["mm_per_pixel"], str(tmp_path / "out"))
+
+    assert set(result) == {"annotated_image_path", "grains"}
+    assert cv2.imread(result["annotated_image_path"]) is not None
+    for grain in result["grains"]:
+        assert set(grain) == {
+            "id",
+            "bbox",
+            "center",
+            "length_mm",
+            "width_mm",
+            "lb_ratio",
+            "mean_rgb",
+            "chalk_fraction",
+            "label",
+            "confidence",
+            "low_confidence",
+            "reason",
+        }
+        assert grain["label"] in {"good", "broken", "chalky", "discolored"}
+        assert grain["low_confidence"] == (grain["confidence"] < 0.6)
+        assert grain["reason"]
+
+
+def test_analyze_image_handles_zero_grains(tmp_path):
+    scene = make_scene(seed=17, n_grains=0, lighting="ring_light", out_dir=str(tmp_path))
+
+    result = analyze_image(scene["photo_path"], scene["mm_per_pixel"], str(tmp_path / "empty"))
+
+    assert result["grains"] == []
+    assert cv2.imread(result["annotated_image_path"]) is not None
+
+
+def test_classifier_uses_documented_feature_order():
+    from backend.grain_analysis import feature_vector
+
+    measured = {
+        "length_mm": 5.9,
+        "width_mm": 1.9,
+        "lb_ratio": 3.1,
+        "chalk_fraction": 0.2,
+        "mean_rgb": [210, 220, 230],
+    }
+
+    assert len(FEATURE_NAMES) == 8
+    assert feature_vector(measured, saturation=12.0) == [
+        5.9, 1.9, 3.1, 0.2, 210.0, 220.0, 230.0, 12.0
+    ]
