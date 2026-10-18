@@ -305,6 +305,9 @@
     const mastZ = 0;
     const phoneY = box.top + 0.12;
 
+    context.save();
+    context.globalAlpha = 1;
+    context.globalCompositeOperation = "source-over";
     drawLine([[mastX, 0.15, mastZ], [mastX, phoneY + 0.15, mastZ]], "#4a5357", 8);
     drawLine([[mastX, 1.2, mastZ], [mastX - 0.65, 0.15, 0.55]], "#4a5357", 5);
     drawLine([[mastX, 1.2, mastZ], [mastX + 0.65, 0.15, 0.55]], "#4a5357", 5);
@@ -313,6 +316,27 @@
 
     // Phone lies over the roof with its rear cameras aimed down through the aperture.
     const phone = { left: -0.78, right: 0.78, back: -1.08, front: 1.08, y: phoneY };
+    const phoneBottomY = phone.y - 0.24;
+    const sideColors = ["#171c1f", "#252b2e", "#171c1f", "#252b2e"];
+    drawPolygon(
+      [[phone.left, phoneBottomY, phone.back], [phone.right, phoneBottomY, phone.back],
+        [phone.right, phoneBottomY, phone.front], [phone.left, phoneBottomY, phone.front]],
+      "#121719",
+      "#0c1012",
+    );
+    const phoneSides = [
+      [[phone.left, phone.y, phone.back], [phone.right, phone.y, phone.back],
+        [phone.right, phoneBottomY, phone.back], [phone.left, phoneBottomY, phone.back]],
+      [[phone.right, phone.y, phone.back], [phone.right, phone.y, phone.front],
+        [phone.right, phoneBottomY, phone.front], [phone.right, phoneBottomY, phone.back]],
+      [[phone.right, phone.y, phone.front], [phone.left, phone.y, phone.front],
+        [phone.left, phoneBottomY, phone.front], [phone.right, phoneBottomY, phone.front]],
+      [[phone.left, phone.y, phone.front], [phone.left, phone.y, phone.back],
+        [phone.left, phoneBottomY, phone.back], [phone.left, phoneBottomY, phone.front]],
+    ];
+    phoneSides.forEach(function (side, index) {
+      drawPolygon(side, sideColors[index], "#0c1012");
+    });
     const phoneCorners = [
       [phone.left, phone.y, phone.back],
       [phone.right, phone.y, phone.back],
@@ -337,13 +361,6 @@
       phoneFinish,
       "#111619",
     );
-    drawPolygon(
-      [[phone.left, phone.y, phone.back], [phone.left + 0.055, phone.y - 0.06, phone.back],
-        [phone.left + 0.055, phone.y - 0.06, phone.front],
-        [phone.left, phone.y, phone.front]],
-      "#171c1f",
-      "#111619",
-    );
     drawLine(
       [[phone.left, phone.y, phone.back], [phone.right, phone.y, phone.back],
         [phone.right, phone.y, phone.front], [phone.left, phone.y, phone.front],
@@ -354,7 +371,7 @@
     // Rectangular camera island with three glass lenses on its underside.
     const island = { left: -0.7, right: -0.02, back: -0.93, front: -0.18 };
     const islandTopY = phone.y - 0.045;
-    const islandBottomY = phone.y - 0.22;
+    const islandBottomY = phoneBottomY - 0.04;
     const islandTop = [
       [island.left, islandTopY, island.back],
       [island.right, islandTopY, island.back],
@@ -384,7 +401,9 @@
     });
     drawLine([[0.34, phone.y, -0.58], [0.34, phone.y, -0.28]], "#c0c8ca", 2);
     drawLine([[0.34, phone.y, 0.02], [0.34, phone.y, 0.3]], "#c0c8ca", 2);
-    return project(-0.36, islandBottomY - 0.02, -0.57);
+    const cameraLens = project(-0.36, islandBottomY - 0.02, -0.57);
+    context.restore();
+    return cameraLens;
   }
 
   function addRice() {
