@@ -66,7 +66,11 @@
 		if (!chamber) return;
 		const lighting = document.querySelector("#lighting").value;
 		if (typeof chamber.setLighting === "function") chamber.setLighting(lighting);
-		if (typeof chamber.pourRice === "function") chamber.pourRice();
+		if (typeof chamber.pourRice === "function") {
+			await new Promise((resolve, reject) => {
+				try { chamber.pourRice(resolve); } catch (error) { reject(error); }
+			});
+		}
 		if (typeof chamber.cameraFlash === "function") {
 			await new Promise((resolve) => chamber.cameraFlash(resolve));
 		}
