@@ -56,7 +56,7 @@
     context.fillStyle = "#edf2ef";
     context.fillRect(0, 0, WIDTH, HEIGHT);
 
-    // This side view leaves the top open for the camera and ring light.
+    // This side view leaves the top open for the camera and LED strip.
     context.fillStyle = "#d7ddd8";
     context.beginPath();
     context.moveTo(155, 130);
@@ -76,38 +76,46 @@
     context.fillStyle = "#87928d";
     context.fillRect(210, floorY - 7, 460, 7);
 
-    // Draw the ring light on the upper wall.
-    const centerX = 350;
-    const centerY = 168;
+    // Draw a simulated LED strip along the inside top of the chamber.
     context.save();
     context.shadowColor = colorText(lightingColor);
-    context.shadowBlur = 28;
+    context.shadowBlur = 22;
     context.strokeStyle = colorText(lightingColor);
-    context.lineWidth = 13;
+    context.lineWidth = 12;
+    context.lineCap = "round";
     context.beginPath();
-    context.arc(centerX, centerY, 30, 0, Math.PI * 2);
+    context.moveTo(255, 145);
+    context.lineTo(485, 145);
     context.stroke();
     context.restore();
     context.strokeStyle = "#778188";
-    context.lineWidth = 4;
+    context.lineWidth = 3;
     context.beginPath();
-    context.arc(centerX, centerY, 39, 0, Math.PI * 2);
+    context.moveTo(255, 145);
+    context.lineTo(485, 145);
     context.stroke();
+    context.fillStyle = colorText(lightingColor);
+    for (let ledX = 270; ledX <= 470; ledX += 20) {
+      context.beginPath();
+      context.arc(ledX, 145, 3, 0, Math.PI * 2);
+      context.fill();
+    }
+    context.lineCap = "butt";
 
     // Camera body and lens face the simulated tray.
     context.fillStyle = "#35434b";
-    context.fillRect(555, 145, 82, 48);
+    context.fillRect(555, 160, 82, 48);
     context.fillStyle = "#17262e";
     context.beginPath();
-    context.arc(555, 169, 18, 0, Math.PI * 2);
+    context.arc(555, 184, 18, 0, Math.PI * 2);
     context.fill();
     context.fillStyle = "#67a3bb";
     context.beginPath();
-    context.arc(555, 169, 9, 0, Math.PI * 2);
+    context.arc(555, 184, 9, 0, Math.PI * 2);
     context.fill();
     context.fillStyle = "#202c31";
     context.font = "16px sans-serif";
-    context.fillText("SIMULATED CAMERA", 637, 175);
+    context.fillText("SIMULATED CAMERA", 637, 190);
 
     // Label is part of the canvas drawing so the demo is self-contained.
     context.fillStyle = "#1d3930";
@@ -185,7 +193,7 @@
     if (flashAmount <= 0) return;
     context.save();
     context.globalAlpha = flashAmount;
-    const glow = context.createRadialGradient(555, 169, 4, 555, 169, 310);
+    const glow = context.createRadialGradient(555, 184, 4, 555, 184, 310);
     glow.addColorStop(0, "#ffffff");
     glow.addColorStop(1, "rgba(255, 255, 255, 0)");
     context.fillStyle = glow;
