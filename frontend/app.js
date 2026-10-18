@@ -258,11 +258,41 @@
 		};
 	}
 
+	function summarizeMeasurements(grains, key) {
+		const values = grains
+			.map((grain) => grain[key])
+			.filter((value) => typeof value === "number" && Number.isFinite(value));
+		if (!values.length) return null;
+		const average = values.reduce((sum, value) => sum + value, 0) / values.length;
+		const variance = values.reduce(
+			(sum, value) => sum + (value - average) ** 2,
+			0,
+		) / values.length;
+		const bounds = values.reduce(
+			(result, value) => ({
+				minimum: Math.min(result.minimum, value),
+				maximum: Math.max(result.maximum, value),
+			}),
+			{ minimum: Infinity, maximum: -Infinity },
+		);
+		return {
+			...bounds,
+			standardDeviation: Math.sqrt(variance),
+		};
+	}
+
+	function setMeasurementValue(id, value) {
+		document.querySelector(`#${id}`).textContent =
+			Number.isFinite(value) ? value.toFixed(2) : "—";
+	}
+
 	function renderReportCharts() {
 		if (!batch) return;
 		const summary = batch.summary;
 		const created = new Date(batch.created_at);
 		const uploadedPhoto = isUploadedPhoto();
+		const lengthStats = summarizeMeasurements(batch.grains, "length_mm");
+		const widthStats = summarizeMeasurements(batch.grains, "width_mm");
 		document.querySelector("#report-subtitle").textContent = uploadedPhoto
 			? `${batch.variety} · uploaded photo · estimated dimensions`
 			: `${batch.variety} · ${batch.lighting.replaceAll("_", " ")} lighting · simulated chamber`;
@@ -274,6 +304,13 @@
 		document.querySelector("#identity-batch").textContent = batch.batch_id;
 		document.querySelector("#mean-length").textContent = Number(summary.mean_length_mm).toFixed(2);
 		document.querySelector("#mean-width").textContent = Number(summary.mean_width_mm).toFixed(2);
+		setMeasurementValue("mean-lb-ratio", Number(summary.mean_lb_ratio));
+		setMeasurementValue("length-min", lengthStats?.minimum);
+		setMeasurementValue("length-max", lengthStats?.maximum);
+		setMeasurementValue("length-std", Number(summary.std_length_mm));
+		setMeasurementValue("width-min", widthStats?.minimum);
+		setMeasurementValue("width-max", widthStats?.maximum);
+		setMeasurementValue("width-std", widthStats?.standardDeviation);
 		document.querySelector("#summary-good").textContent = `${summary.percent.good ?? 0}%`;
 		document.querySelector("#mean-confidence").textContent = `${Math.round(Number(summary.mean_confidence || 0) * 100)}%`;
 		document.querySelector("#confidence-warning").hidden = !(Number(summary.low_confidence_count) > 0);
@@ -282,6 +319,9 @@
 		document.querySelector("#report-legend").innerHTML = categories.map(({ key, label, css }) => `<div class="quality-row"><i class="legend-dot ${css}"></i><span>${label} · ${summary.percent[key] ?? 0}%</span><strong>${summary.counts[key] ?? 0}</strong></div>`).join("");
 		document.querySelector("#mean-length-note").textContent = uploadedPhoto ? "estimated mm · assumed scale" : "millimetres";
 		document.querySelector("#mean-width-note").textContent = uploadedPhoto ? "estimated mm · assumed scale" : "millimetres";
+		document.querySelector("#measurement-footnote").textContent = uploadedPhoto
+			? "Estimated millimetres · assumed 0.12 mm/pixel; not calibrated."
+			: "Millimetres · measurements from the simulated scan.";
 		document.querySelector("#length-chart-footnote").textContent = uploadedPhoto
 			? "Estimated millimetres · assumed 0.12 mm/pixel"
 			: "Length in millimetres · simulated measurements";

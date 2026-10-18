@@ -219,7 +219,7 @@ button { cursor: pointer; }
 .batch-ref { display: flex; flex-direction: column; gap: 5px; text-align: right; }
 .batch-ref strong { font-size: 13px; letter-spacing: .04em; }.batch-ref small { color: #d4e5d7; font-size: 10px; }
 .report-grid { display: grid; grid-template-columns: 1.2fr .8fr; gap: 16px; margin-top: 17px; }
-.summary-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 11px; margin-top: 14px; }
+.summary-cards { display: grid; grid-template-columns: repeat(5, 1fr); gap: 11px; margin-top: 14px; }
 .summary-card { min-width: 0; display: flex; flex-direction: column; gap: 6px; padding: 13px 15px; background: #f7faf6; border: 1px solid var(--line); border-radius: 10px; }
 .summary-card > span { color: #758379; font-size: 8px; font-weight: 800; letter-spacing: .08em; }
 .summary-card strong { color: var(--green-900); font-size: 22px; letter-spacing: -.4px; }
@@ -229,6 +229,13 @@ button { cursor: pointer; }
 .warning-card p, .warning-card strong, .warning-card small { display: block; margin: 0; }.warning-card strong { font-size: 11px; }.warning-card small { margin-top: 3px; color: #886a45; font-size: 10px; }
 .report-card { padding: 19px; background: #fff; border: 1px solid var(--line); border-radius: 11px; }
 .report-card h3 { margin: 0 0 17px; color: #34443a; font-size: 13px; }
+.measurement-card { margin-top: 16px; }
+.measurement-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.measurement-table th, .measurement-table td { padding: 9px 12px; border-bottom: 1px solid #edf1eb; text-align: right; white-space: nowrap; }
+.measurement-table thead th { color: #718076; background: #f7faf6; font-size: 9px; font-weight: 750; }
+.measurement-table th:first-child { text-align: left; }
+.measurement-table tbody th { color: #34443a; font-weight: 700; }
+.measurement-table tbody td { color: var(--green-900); font-variant-numeric: tabular-nums; }
 .chart-container { position: relative; height: 220px; }
 .doughnut-container { height: 190px; max-width: 260px; margin: 0 auto; }
 .chart-footnote { margin: 7px 0 0; color: #839087; font-size: 9px; }
