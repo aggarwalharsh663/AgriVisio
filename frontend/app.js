@@ -4,6 +4,10 @@
 	const scanError = document.querySelector("#scan-error");
 	const message = document.querySelector("#app-message");
 	const slider = document.querySelector("#grain-count");
+	const scanSource = document.querySelector("#scan-source");
+	const photoInput = document.querySelector("#photo-upload");
+	const uploadField = document.querySelector("#upload-field");
+	let photoPreviewUrl = null;
 	const stepButtons = [...document.querySelectorAll(".step-item")];
 	const canvas = document.querySelector("#detection-canvas");
 	const context = canvas.getContext("2d");
@@ -54,10 +58,24 @@
 		if (step === 4) renderReportCharts();
 	}
 
+	function isUploadedPhoto(record = batch) {
+		return Boolean(record?.images?.raw?.includes("/uploaded-photo.jpg"));
+	}
+
+	function updateScanSource() {
+		const uploading = scanSource.value === "upload";
+		uploadField.hidden = !uploading;
+		photoInput.disabled = !uploading;
+		photoInput.required = uploading;
+		document.querySelector("#chamber-figure").hidden = uploading;
+		document.querySelector("#grain-count-field").hidden = uploading;
+		document.querySelector("#scan-button .button-label").textContent = uploading ? "Analyze photo" : "Pour rice and scan";
+	}
+
 	function setLoading(loading) {
 		scanButton.disabled = loading;
 		scanButton.classList.toggle("is-loading", loading);
-		scanButton.querySelector(".button-label").textContent = loading ? "Scanning simulated sample…" : "Pour rice and scan";
+		scanButton.querySelector(".button-label").textContent = loading ? "Analyzing simulated sample…" : scanSource.value === "upload" ? "Analyze photo" : "Pour rice and scan";
 		form.setAttribute("aria-busy", String(loading));
 	}
 
@@ -85,6 +103,21 @@
 	function renderCalibration() {
 		document.querySelector("#raw-image").src = batch.images.raw;
 		document.querySelector("#calibrated-image").src = batch.images.calibrated;
+		document.querySelector(".image-tag-left").textContent = isUploadedPhoto()
+			? "UPLOADED · UNCALIBRATED"
+			: "CALIBRATED";
+		document.querySelector(".image-tag-right").textContent = isUploadedPhoto()
+			? "SAME PHOTO"
+			: "RAW · SIMULATED";
+		document.querySelector("#calibrated-image").alt = isUploadedPhoto()
+			? "Uncalibrated uploaded rice photo"
+			: "Color-calibrated simulated rice sample photo";
+		if (isUploadedPhoto()) {
+			document.querySelector("#error-before").textContent = "N/A";
+			document.querySelector("#error-after").textContent = "N/A";
+			document.querySelector("#improvement-text").textContent = "No card · estimated scale";
+			return;
+		}
 		const before = Number(batch.calibration.patch_error_before);
 		const after = Number(batch.calibration.patch_error_after);
 		document.querySelector("#error-before").textContent = Number.isFinite(before) ? before.toFixed(1) : "—";
@@ -233,7 +266,10 @@
 		if (!batch) return;
 		const summary = batch.summary;
 		const created = new Date(batch.created_at);
-		document.querySelector("#report-subtitle").textContent = `${batch.variety} · ${batch.lighting.replaceAll("_", " ")} lighting · simulated chamber`;
+		const uploadedPhoto = isUploadedPhoto();
+		document.querySelector("#report-subtitle").textContent = uploadedPhoto
+			? `${batch.variety} · uploaded photo · estimated dimensions`
+			: `${batch.variety} · ${batch.lighting.replaceAll("_", " ")} lighting · simulated chamber`;
 		document.querySelector("#report-sample").textContent = batch.sample_name;
 		document.querySelector("#report-variety").textContent = batch.variety;
 		document.querySelector("#report-count").textContent = summary.total_grains;
@@ -248,7 +284,21 @@
 		const flaggedIds = batch.grains.filter((grain) => grain.low_confidence).map((grain) => grain.id);
 		document.querySelector("#warning-count").textContent = `${summary.low_confidence_count} grain${summary.low_confidence_count === 1 ? " needs" : "s need"} manual review${flaggedIds.length ? ` · #${flaggedIds.join(", #")}` : ""}.`;
 		document.querySelector("#report-legend").innerHTML = categories.map(({ key, label, css }) => `<div class="quality-row"><i class="legend-dot ${css}"></i><span>${label} · ${summary.percent[key] ?? 0}%</span><strong>${summary.counts[key] ?? 0}</strong></div>`).join("");
-		document.querySelector("#validation-accuracy").textContent = `${(Number(batch.validation.accuracy || 0) * 100).toFixed(1)}%`;
+		document.querySelector("#mean-length-note").textContent = uploadedPhoto ? "estimated mm · assumed scale" : "millimetres";
+		document.querySelector("#mean-width-note").textContent = uploadedPhoto ? "estimated mm · assumed scale" : "millimetres";
+		document.querySelector("#length-chart-footnote").textContent = uploadedPhoto
+			? "Estimated millimetres · assumed 0.12 mm/pixel"
+			: "Length in millimetres · simulated measurements";
+		document.querySelector("#validation-note").textContent = uploadedPhoto
+			? "not available for uploaded photos (no ground truth)"
+			: "validated against simulator ground truth";
+		document.querySelector("#report-note-text").innerHTML = uploadedPhoto
+			? "<strong>Uploaded photo · estimated measurements.</strong> Millimetres assume 0.12 mm/pixel because no calibration card was provided. Grain classes come from a model trained on simulated samples; validation against photo ground truth is unavailable. The camera and chamber remain simulated; this is not a laboratory result."
+			: "<strong>Simulated hardware demo.</strong> Camera, chamber lighting, grain detection, and measurements are simulated. This report is for demonstration and is not a laboratory result.";
+		document.querySelector("#validation-content").hidden = uploadedPhoto;
+		document.querySelector("#validation-accuracy").textContent = uploadedPhoto
+			? "N/A"
+			: `${(Number(batch.validation.accuracy || 0) * 100).toFixed(1)}%`;
 		renderValidation();
 		renderGrainTable();
 		renderQrCode();
@@ -257,6 +307,7 @@
 
 	function renderValidation() {
 		const validation = batch.validation;
+		if (isUploadedPhoto()) return;
 		const labels = validation.labels || categories.map(({ key }) => key);
 		const displayClass = (key) => categories.find(({ key: categoryKey }) => categoryKey === key)?.label || key;
 		const matrix = validation.confusion_matrix || [];
@@ -448,6 +499,21 @@
 		document.querySelector("#grain-count-value").textContent = `${slider.value} grains`;
 	});
 	document.querySelector("#comparison-range").addEventListener("input", (event) => updateComparison(event.currentTarget.value));
+	scanSource.addEventListener("change", updateScanSource);
+	photoInput.addEventListener("change", () => {
+		if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl);
+		photoPreviewUrl = null;
+		const photo = photoInput.files[0];
+		const preview = document.querySelector("#photo-preview");
+		if (!photo) {
+			preview.hidden = true;
+			preview.removeAttribute("src");
+			return;
+		}
+		photoPreviewUrl = URL.createObjectURL(photo);
+		preview.src = photoPreviewUrl;
+		preview.hidden = false;
+	});
 	document.querySelector("#scan-speed").addEventListener("change", () => { if (activeStep === 3) startDetection(); });
 	document.querySelector("#replay-detection").addEventListener("click", startDetection);
 	document.querySelector("#grain-filter").addEventListener("change", renderGrainTable);
@@ -483,10 +549,24 @@
 			n_grains: Number(slider.value),
 		};
 		if (!payload.sample_name || !payload.variety) { showFriendlyError("Please enter both a sample name and a rice variety to continue."); return; }
+		const uploadingPhoto = scanSource.value === "upload";
+		const photo = photoInput.files[0];
+		if (uploadingPhoto && !photo) { showFriendlyError("Choose a rice photo before starting the analysis."); return; }
+		if (uploadingPhoto && photo.size > 10 * 1024 * 1024) { showFriendlyError("Choose a photo that is 10 MB or smaller."); return; }
 		setLoading(true);
 		try {
-			await runChamberEffects();
-			const response = await fetch("/api/scan", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+			let response;
+			if (uploadingPhoto) {
+				const formData = new FormData();
+				formData.append("image", photo);
+				formData.append("sample_name", payload.sample_name);
+				formData.append("variety", payload.variety);
+				formData.append("lighting", payload.lighting);
+				response = await fetch("/api/scan/upload", { method: "POST", body: formData });
+			} else {
+				await runChamberEffects();
+				response = await fetch("/api/scan", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+			}
 			const result = await response.json().catch(() => ({}));
 			if (!response.ok) throw new Error(typeof result.detail === "string" ? result.detail : "The scan service could not complete the request.");
 			if (!result.images || !result.calibration || !result.summary || !Array.isArray(result.grains)) throw new Error("The scan returned incomplete results. Please try again.");
@@ -512,6 +592,11 @@
 		selectedGrainId = null;
 		furthestStep = 1;
 		form.reset();
+		updateScanSource();
+		if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl);
+		photoPreviewUrl = null;
+		document.querySelector("#photo-preview").hidden = true;
+		document.querySelector("#photo-preview").removeAttribute("src");
 		document.querySelector("#grain-count-value").textContent = `${slider.value} grains`;
 		scanError.hidden = true;
 		destroyCharts();

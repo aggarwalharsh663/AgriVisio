@@ -101,13 +101,67 @@ def feature_vector(measurement: dict, saturation: float) -> list[float]:
     ]
 
 
-def segment_grains(image_bgr: np.ndarray) -> list[np.ndarray]:
+def _split_touching_grains(
+    image_bgr: np.ndarray, foreground: np.ndarray
+) -> list[np.ndarray]:
+    """Split touching foreground grains using distance-transform watershed."""
+    height, width = foreground.shape
+    distance = cv2.distanceTransform(foreground, cv2.DIST_L2, 5)
+    seed_spacing = max(17, round(min(height, width) * 0.035))
+    seed_kernel = cv2.getStructuringElement(
+        cv2.MORPH_ELLIPSE, (seed_spacing, seed_spacing)
+    )
+    local_maxima = (
+        (distance >= cv2.dilate(distance, seed_kernel) - 1e-4)
+        & (distance >= 3)
+        & (foreground > 0)
+    ).astype(np.uint8)
+    grouped_maxima = cv2.dilate(local_maxima, seed_kernel)
+    group_count, group_labels = cv2.connectedComponents(grouped_maxima, 8)
+
+    markers = np.ones((height, width), dtype=np.int32)
+    markers[foreground > 0] = 0
+    seed_labels = []
+    for group_id in range(1, group_count):
+        peak_y, peak_x = np.where(
+            (group_labels == group_id) & (local_maxima > 0)
+        )
+        if not len(peak_x):
+            continue
+        strongest_peak = int(np.argmax(distance[peak_y, peak_x]))
+        seed_labels.append(len(seed_labels) + 2)
+        markers[peak_y[strongest_peak], peak_x[strongest_peak]] = seed_labels[-1]
+
+    if not seed_labels:
+        return []
+
+    watershed_labels = cv2.watershed(image_bgr.copy(), markers)
+    contours = []
+    for seed_label in seed_labels:
+        grain_mask = (
+            (watershed_labels == seed_label) & (foreground > 0)
+        ).astype(np.uint8) * 255
+        if cv2.countNonZero(grain_mask) < MIN_GRAIN_AREA:
+            continue
+        found, _ = cv2.findContours(
+            grain_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        )
+        if found:
+            contours.append(max(found, key=cv2.contourArea))
+    return contours
+
+
+def segment_grains(
+    image_bgr: np.ndarray,
+    ignore_calibration_card: bool = True,
+    split_touching: bool = False,
+) -> list[np.ndarray]:
     """Find grain contours, ordered from left to right."""
     if image_bgr is None or image_bgr.ndim != 3 or image_bgr.shape[2] != 3:
         raise ValueError("image_bgr must be a three-channel BGR image")
 
     height, width = image_bgr.shape[:2]
-    card_start = min(CARD_IGNORE_X, width)
+    card_start = min(CARD_IGNORE_X, width) if ignore_calibration_card else width
     gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
     blurred = cv2.GaussianBlur(gray, BLUR_KERNEL_SIZE, 0)
     otsu_threshold, _ = cv2.threshold(
@@ -126,6 +180,10 @@ def segment_grains(image_bgr: np.ndarray) -> list[np.ndarray]:
         cv2.MORPH_ELLIPSE, OPENING_KERNEL_SIZE
     )
     opened = cv2.morphologyEx(mask, cv2.MORPH_OPEN, opening_kernel)
+    if split_touching:
+        contours = _split_touching_grains(image_bgr, opened)
+        return sorted(contours, key=lambda contour: cv2.minAreaRect(contour)[0][0])
+
     component_count, component_labels, stats, _ = cv2.connectedComponentsWithStats(
         opened, connectivity=8
     )
@@ -188,7 +246,13 @@ def _reason(label: str, measurement: dict, batch_median: float, model) -> str:
     )
 
 
-def analyze_image(image_path: str, mm_per_pixel: float, output_dir: str) -> dict:
+def _analyze_image(
+    image_path: str,
+    mm_per_pixel: float,
+    output_dir: str,
+    ignore_calibration_card: bool,
+    split_touching: bool,
+) -> dict:
     """Segment, measure, classify, and annotate grains in an image."""
     if mm_per_pixel <= 0:
         raise ValueError("mm_per_pixel must be greater than zero")
@@ -196,7 +260,11 @@ def analyze_image(image_path: str, mm_per_pixel: float, output_dir: str) -> dict
     if image is None:
         raise FileNotFoundError(f"Could not read grain image: {image_path}")
 
-    contours = segment_grains(image)
+    contours = segment_grains(
+        image,
+        ignore_calibration_card=ignore_calibration_card,
+        split_touching=split_touching,
+    )
     details = [
         _measure_grain_details(contour, image, mm_per_pixel)
         for contour in contours
@@ -260,3 +328,27 @@ def analyze_image(image_path: str, mm_per_pixel: float, output_dir: str) -> dict
         "annotated_image_path": str(annotated_path),
         "grains": grains,
     }
+
+
+def analyze_image(image_path: str, mm_per_pixel: float, output_dir: str) -> dict:
+    """Analyze a simulated scene while excluding its calibration card."""
+    return _analyze_image(
+        image_path,
+        mm_per_pixel,
+        output_dir,
+        ignore_calibration_card=True,
+        split_touching=False,
+    )
+
+
+def analyze_uploaded_image(
+    image_path: str, mm_per_pixel: float, output_dir: str
+) -> dict:
+    """Analyze a full uploaded photo and split touching grains."""
+    return _analyze_image(
+        image_path,
+        mm_per_pixel,
+        output_dir,
+        ignore_calibration_card=False,
+        split_touching=True,
+    )

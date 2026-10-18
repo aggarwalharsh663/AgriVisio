@@ -91,6 +91,11 @@ button { cursor: pointer; }
 .chamber-visual { margin: 0 0 24px; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: #edf2ef; }
 #chamber-canvas { display: block; width: 100%; height: auto; }
 .chamber-visual figcaption { padding: 8px 12px; color: var(--muted); font-size: 11px; text-align: center; }
+#upload-field[hidden], #grain-count-field[hidden], #chamber-figure[hidden] { display: none; }
+.source-grid { margin-bottom: 22px; }
+.upload-field > label { color: #34443a; font-size: 13px; font-weight: 700; }
+.upload-field input[type="file"] { width: 100%; padding: 10px; color: var(--ink); background: #fcfdfb; border: 1px solid #dce5dc; border-radius: 9px; font-size: 13px; }
+#photo-preview { width: min(100%, 460px); max-height: 250px; object-fit: contain; object-position: left center; border: 1px solid var(--line); border-radius: 9px; background: #edf2ef; }
 .intro { display: flex; align-items: end; justify-content: space-between; gap: 24px; padding: 42px 0 28px; }
 .eyebrow { margin: 0 0 9px; color: var(--green-700); font-size: 11px; font-weight: 800; letter-spacing: 0.13em; }
 .intro h1 { margin: 0; color: var(--green-950); font-size: clamp(30px, 4vw, 43px); line-height: 1.12; letter-spacing: -1.7px; }

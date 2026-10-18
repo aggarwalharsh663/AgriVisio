@@ -8,7 +8,8 @@ from statistics import mean, pstdev
 from uuid import uuid4
 
 import cv2
-from fastapi import FastAPI, HTTPException
+import numpy as np
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -17,7 +18,7 @@ from pydantic import BaseModel, Field
 from backend.calibration import calibrate
 from backend.database import get_batch as read_batch
 from backend.database import list_batches, save_batch
-from backend.grain_analysis import analyze_image
+from backend.grain_analysis import analyze_image, analyze_uploaded_image
 from backend.simulator import make_scene
 from validation.validate import compare
 
@@ -29,6 +30,9 @@ DATABASE_PATH = PROJECT_ROOT / "agriscan.sqlite3"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 _batch_lock = threading.Lock()
 LABELS = ["good", "broken", "chalky", "discolored"]
+UPLOAD_MAX_BYTES = 10 * 1024 * 1024
+UPLOAD_MAX_PIXELS = 20_000_000
+ESTIMATED_MM_PER_PIXEL = 0.12
 
 
 class ScanRequest(BaseModel):
@@ -306,6 +310,103 @@ def _make_real_batch(request: ScanRequest) -> dict:
     return batch
 
 
+def _make_uploaded_batch(
+    image: np.ndarray, sample_name: str, variety: str, lighting: str
+) -> dict:
+    """Analyze an uploaded photo using an explicitly estimated pixel scale."""
+    batch_id = _next_batch_id()
+    batch_dir = DATA_DIR / batch_id
+    batch_dir.mkdir(parents=True, exist_ok=False)
+    raw_path = batch_dir / "uploaded-photo.jpg"
+    calibrated_path = batch_dir / "calibrated.jpg"
+    if not cv2.imwrite(str(raw_path), image) or not cv2.imwrite(
+        str(calibrated_path), image
+    ):
+        raise OSError("The uploaded photo could not be saved.")
+
+    analysis = analyze_uploaded_image(
+        str(calibrated_path), ESTIMATED_MM_PER_PIXEL, str(batch_dir)
+    )
+    grains = analysis["grains"]
+    estimate_note = (
+        "Estimated size; assumed scale 0.12 mm/pixel (not calibrated). "
+    )
+    for grain in grains:
+        grain["reason"] = estimate_note + grain["reason"]
+
+    counts = {
+        label: sum(grain["label"] == label for grain in grains)
+        for label in LABELS
+    }
+    total = len(grains)
+    lengths = [grain["length_mm"] for grain in grains]
+    widths = [grain["width_mm"] for grain in grains]
+    percent = {
+        label: round(count / total * 100, 1) if total else 0
+        for label, count in counts.items()
+    }
+    vector = [percent[label] / 100 for label in LABELS]
+    base_url = f"/files/{batch_id}"
+    batch = {
+        "batch_id": batch_id,
+        "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "sample_name": sample_name.strip(),
+        "variety": variety.strip(),
+        "lighting": lighting,
+        "simulated": True,
+        "images": {
+            "raw": f"{base_url}/uploaded-photo.jpg",
+            "calibrated": f"{base_url}/calibrated.jpg",
+            "annotated": f"{base_url}/annotated.jpg",
+        },
+        "calibration": {
+            "patch_error_before": None,
+            "patch_error_after": None,
+        },
+        "grains": grains,
+        "summary": {
+            "total_grains": total,
+            "counts": counts,
+            "percent": percent,
+            "mean_length_mm": round(mean(lengths), 2) if lengths else 0,
+            "std_length_mm": round(pstdev(lengths), 2)
+            if len(lengths) > 1
+            else 0,
+            "mean_width_mm": round(mean(widths), 2) if widths else 0,
+            "mean_lb_ratio": round(mean(grain["lb_ratio"] for grain in grains), 2)
+            if grains
+            else 0,
+            "mean_confidence": round(
+                mean(grain["confidence"] for grain in grains), 3
+            )
+            if grains
+            else 0,
+            "low_confidence_count": sum(
+                grain["low_confidence"] for grain in grains
+            ),
+        },
+        "fingerprint": {
+            "vector": vector,
+            "hash": hashlib.sha256(json.dumps(vector).encode()).hexdigest(),
+        },
+        "validation": {
+            "accuracy": None,
+            "per_class": {
+                label: {"precision": None, "recall": None}
+                for label in LABELS
+            },
+            "confusion_matrix": [[0 for _ in LABELS] for _ in LABELS],
+            "labels": LABELS,
+            "length_mae_mm": None,
+        },
+    }
+    (batch_dir / "batch.json").write_text(
+        json.dumps(batch, indent=2), encoding="utf-8"
+    )
+    save_batch(batch, DATABASE_PATH)
+    return batch
+
+
 app = FastAPI(title="Agri Scan (SIMULATED HARDWARE DEMO)")
 app.add_middleware(
     CORSMiddleware,
@@ -334,6 +435,56 @@ def scan(request: ScanRequest):
                 "detail": f"The simulated scan could not be completed: {exc}",
             },
         )
+
+
+@app.post("/api/scan/upload")
+async def scan_uploaded_photo(
+    image: UploadFile = File(...),
+    sample_name: str = Form(...),
+    variety: str = Form(...),
+    lighting: str = Form(...),
+):
+    if not sample_name.strip() or len(sample_name.strip()) > 80:
+        raise HTTPException(
+            status_code=422, detail="Sample name must contain 1 to 80 characters."
+        )
+    if not variety.strip() or len(variety.strip()) > 80:
+        raise HTTPException(
+            status_code=422, detail="Rice variety must contain 1 to 80 characters."
+        )
+    if lighting not in {"ring_light", "daylight", "tube_light"}:
+        raise HTTPException(status_code=422, detail="Unknown lighting profile.")
+
+    try:
+        contents = await image.read(UPLOAD_MAX_BYTES + 1)
+        if len(contents) > UPLOAD_MAX_BYTES:
+            raise HTTPException(
+                status_code=413, detail="Photo must be 10 MB or smaller."
+            )
+        decoded = cv2.imdecode(np.frombuffer(contents, dtype=np.uint8), cv2.IMREAD_COLOR)
+        if decoded is None:
+            raise HTTPException(
+                status_code=422, detail="Choose a valid JPEG, PNG, or WebP photo."
+            )
+        height, width = decoded.shape[:2]
+        if width * height > UPLOAD_MAX_PIXELS:
+            raise HTTPException(
+                status_code=413,
+                detail="Photo dimensions must be 20 megapixels or smaller.",
+            )
+        return _make_uploaded_batch(decoded, sample_name, variety, lighting)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": "scan_failed",
+                "detail": f"The uploaded photo could not be analyzed: {exc}",
+            },
+        )
+    finally:
+        await image.close()
 
 
 @app.get("/api/batches")
