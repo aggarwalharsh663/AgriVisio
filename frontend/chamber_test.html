@@ -21,6 +21,11 @@
         width: 100%;
         height: auto;
         border: 1px solid #c5c9c3;
+        cursor: grab;
+        touch-action: none;
+      }
+      canvas:active {
+        cursor: grabbing;
       }
       .controls {
         display: flex;
@@ -43,10 +48,12 @@
       <canvas id="chamber-canvas" width="900" height="560"
         aria-label="Simulated rice imaging chamber"></canvas>
       <div class="controls" aria-label="Simulated chamber controls">
-        <button type="button" data-light="ring_light">Ring light</button>
+        <button type="button" data-light="ring_light">LED strips</button>
         <button type="button" data-light="daylight">Daylight</button>
         <button type="button" data-light="tube_light">Tube light</button>
+        <button type="button" id="reset-view-button">Reset 3D view</button>
         <button type="button" id="pour-button">Pour simulated rice</button>
+        <button type="button" id="restart-rice-button">Restart rice animation</button>
         <button type="button" id="flash-button">Simulated camera flash</button>
       </div>
     </main>
@@ -57,9 +64,17 @@
           window.Chamber.setLighting(button.dataset.light);
         });
       });
+      document.getElementById("reset-view-button").addEventListener("click", function () {
+        window.Chamber.resetView();
+      });
       document.getElementById("pour-button").addEventListener("click", function () {
         window.Chamber.pourRice(function () {
           console.log("Simulated rice pour complete");
+        });
+      });
+      document.getElementById("restart-rice-button").addEventListener("click", function () {
+        window.Chamber.restartRice(function () {
+          console.log("Simulated rice animation restarted");
         });
       });
       document.getElementById("flash-button").addEventListener("click", function () {
