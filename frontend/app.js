@@ -64,10 +64,11 @@
 	async function runChamberEffects() {
 		const chamber = window.Chamber;
 		if (!chamber) return;
-		for (const effect of ["pourRice", "cameraFlash"]) {
-			if (typeof chamber[effect] === "function") {
-				try { await chamber[effect](); } catch { /* Optional simulated chamber animations. */ }
-			}
+		const lighting = document.querySelector("#lighting").value;
+		if (typeof chamber.setLighting === "function") chamber.setLighting(lighting);
+		if (typeof chamber.pourRice === "function") chamber.pourRice();
+		if (typeof chamber.cameraFlash === "function") {
+			await new Promise((resolve) => chamber.cameraFlash(resolve));
 		}
 	}
 
@@ -479,8 +480,8 @@
 		};
 		if (!payload.sample_name || !payload.variety) { showFriendlyError("Please enter both a sample name and a rice variety to continue."); return; }
 		setLoading(true);
-		await runChamberEffects();
 		try {
+			await runChamberEffects();
 			const response = await fetch("/api/scan", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
 			const result = await response.json().catch(() => ({}));
 			if (!response.ok) throw new Error(typeof result.detail === "string" ? result.detail : "The scan service could not complete the request.");
