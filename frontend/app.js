@@ -258,11 +258,122 @@
 		};
 	}
 
+	function summarizeMeasurements(grains, key) {
+		const values = grains
+			.map((grain) => grain[key])
+			.filter((value) => typeof value === "number" && Number.isFinite(value));
+		if (!values.length) return null;
+		const average = values.reduce((sum, value) => sum + value, 0) / values.length;
+		const variance = values.reduce(
+			(sum, value) => sum + (value - average) ** 2,
+			0,
+		) / values.length;
+		return {
+			average,
+			minimum: Math.min(...values),
+			maximum: Math.max(...values),
+			standardDeviation: Math.sqrt(variance),
+		};
+	}
+
+	function rgbToLab(rgb) {
+		const linear = rgb.map((channel) => {
+			const value = channel / 255;
+			return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+		});
+		const x = (linear[0] * 0.4124564 + linear[1] * 0.3575761 + linear[2] * 0.1804375) / 0.95047;
+		const y = linear[0] * 0.2126729 + linear[1] * 0.7151522 + linear[2] * 0.072175;
+		const z = (linear[0] * 0.0193339 + linear[1] * 0.119192 + linear[2] * 0.9503041) / 1.08883;
+		const pivot = (value) => value > 0.0088564517
+			? Math.cbrt(value)
+			: value / (3 * 0.1379310345 ** 2) + 4 / 29;
+		const fx = pivot(x);
+		const fy = pivot(y);
+		const fz = pivot(z);
+		return [116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz)];
+	}
+
+	function formatShare(count, total) {
+		const percent = total ? (count / total * 100).toFixed(2) : "0.00";
+		return `${count} (${percent}%)`;
+	}
+
+	function renderRiceMetrics(grains, uploadedPhoto) {
+		const total = grains.length;
+		const lengthStats = summarizeMeasurements(grains, "length_mm");
+		const widthStats = summarizeMeasurements(grains, "width_mm");
+		const setValue = (id, value) => {
+			document.querySelector(`#${id}`).textContent =
+				Number.isFinite(value) ? value.toFixed(2) : "—";
+		};
+		for (const [prefix, stats] of [["length", lengthStats], ["width", widthStats]]) {
+			for (const [suffix, key] of [
+				["mean", "average"],
+				["min", "minimum"],
+				["max", "maximum"],
+				["std", "standardDeviation"],
+			]) {
+				setValue(`rice-${prefix}-${suffix}`, stats?.[key]);
+			}
+		}
+
+		const count = (predicate) => grains.filter(predicate).length;
+		for (const [id, matches] of [
+			["rice-short", count((grain) => grain.length_mm < 5.5)],
+			["rice-long", count((grain) => grain.length_mm >= 6.6)],
+			["rice-thin", count((grain) => grain.width_mm < 1.7)],
+			["rice-thick", count((grain) => grain.width_mm >= 2.0)],
+			["rice-broken-count", count((grain) => grain.label === "broken")],
+			["rice-damaged", count((grain) => grain.label === "broken" || grain.label === "discolored")],
+			["rice-discolored", count((grain) => grain.label === "discolored")],
+			["rice-chalky", count((grain) => grain.chalk_fraction >= 0.33)],
+		]) {
+			document.querySelector(`#${id}`).textContent = formatShare(matches, total);
+		}
+
+		setValue("rice-lb-ratio", summarizeMeasurements(grains, "lb_ratio")?.average);
+		const totalAreaProxy = grains.reduce(
+			(sum, grain) => sum + grain.length_mm * grain.width_mm,
+			0,
+		);
+		const brokenAreaProxy = grains.reduce(
+			(sum, grain) => sum + (
+				grain.label === "broken" ? grain.length_mm * grain.width_mm : 0
+			),
+			0,
+		);
+		document.querySelector("#rice-broken-weight").textContent = totalAreaProxy
+			? `${(brokenAreaProxy / totalAreaProxy * 100).toFixed(2)}%`
+			: "—";
+
+		const labValues = grains
+			.filter((grain) => Array.isArray(grain.mean_rgb) && grain.mean_rgb.length === 3)
+			.map((grain) => rgbToLab(grain.mean_rgb));
+		if (labValues.length) {
+			const whiteness = labValues.map(([lightness, a, b]) =>
+				100 - Math.hypot(100 - lightness, a, b)
+			);
+			const chroma = labValues.map(([, a, b]) => Math.hypot(a, b));
+			setValue("rice-whiteness", whiteness.reduce((sum, value) => sum + value, 0) / whiteness.length);
+			setValue("rice-color-index", chroma.reduce((sum, value) => sum + value, 0) / chroma.length);
+		} else {
+			setValue("rice-whiteness", null);
+			setValue("rice-color-index", null);
+		}
+		document.querySelector("#rice-dimension-note").textContent = uploadedPhoto
+			? "Estimated mm · assumed scale 0.12 mm/pixel."
+			: "Millimetres · simulated measurements.";
+		document.querySelector("#rice-color-note").textContent = uploadedPhoto
+			? "Estimated from uploaded-photo RGB; color is uncalibrated."
+			: "Estimated from calibrated simulated-grain RGB.";
+	}
+
 	function renderReportCharts() {
 		if (!batch) return;
 		const summary = batch.summary;
 		const created = new Date(batch.created_at);
 		const uploadedPhoto = isUploadedPhoto();
+		renderRiceMetrics(batch.grains, uploadedPhoto);
 		document.querySelector("#report-subtitle").textContent = uploadedPhoto
 			? `${batch.variety} · uploaded photo · estimated dimensions`
 			: `${batch.variety} · ${batch.lighting.replaceAll("_", " ")} lighting · simulated chamber`;
