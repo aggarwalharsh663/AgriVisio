@@ -10,18 +10,25 @@ from uuid import uuid4
 import cv2
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from backend.calibration import calibrate
+from backend.database import get_batch as read_batch
+from backend.database import list_batches, save_batch
+from backend.grain_analysis import analyze_image
 from backend.simulator import make_scene
+from validation.validate import compare
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = PROJECT_ROOT / "frontend"
 DATA_DIR = PROJECT_ROOT / "data"
+DATABASE_PATH = PROJECT_ROOT / "agriscan.sqlite3"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 _batch_lock = threading.Lock()
+LABELS = ["good", "broken", "chalky", "discolored"]
 
 
 class ScanRequest(BaseModel):
@@ -35,10 +42,21 @@ class ScanRequest(BaseModel):
 def _next_batch_id() -> str:
     date_part = datetime.now().strftime("%Y%m%d")
     with _batch_lock:
-        existing = [
+        existing = {
+            path.name
+            for path in DATA_DIR.glob(f"AS-{date_part}-*")
+            if path.is_dir()
+        }
+        existing.update(
             path.name
             for path in (DATA_DIR / "batches").glob(f"AS-{date_part}-*")
-        ]
+            if path.is_dir()
+        )
+        existing.update(
+            batch["batch_id"]
+            for batch in list_batches(DATABASE_PATH)
+            if batch["batch_id"].startswith(f"AS-{date_part}-")
+        )
         sequence = max(
             (int(name.rsplit("-", 1)[-1]) for name in existing), default=0
         ) + 1
@@ -83,7 +101,7 @@ def _mock_grains(ground_truth: dict) -> list[dict]:
     return grains
 
 
-def _make_batch(request: ScanRequest) -> dict:
+def _make_mock_batch(request: ScanRequest) -> dict:
     batch_id = _next_batch_id()
     batch_dir = DATA_DIR / "batches" / batch_id
     batch_dir.mkdir(parents=True, exist_ok=True)
@@ -190,7 +208,103 @@ def _make_batch(request: ScanRequest) -> dict:
         },
     }
     (batch_dir / "batch.json").write_text(json.dumps(batch, indent=2), encoding="utf-8")
+    save_batch(batch, DATABASE_PATH)
     return batch
+
+
+def _make_real_batch(request: ScanRequest) -> dict:
+    batch_id = _next_batch_id()
+    batch_dir = DATA_DIR / batch_id
+    batch_dir.mkdir(parents=True, exist_ok=False)
+    scene = make_scene(
+        seed=(
+            request.seed
+            if request.seed is not None
+            else int(uuid4().int % 2_000_000_000)
+        ),
+        n_grains=request.n_grains,
+        lighting=request.lighting,
+        out_dir=str(batch_dir),
+    )
+    calibrated = calibrate(
+        scene["photo_path"],
+        scene["card_patches"],
+        scene["card_true_rgb"],
+        str(batch_dir / "calibrated.jpg"),
+    )
+    analysis = analyze_image(
+        calibrated["corrected_path"],
+        scene["mm_per_pixel"],
+        str(batch_dir),
+    )
+    validation = compare(scene["ground_truth_path"], analysis["grains"])
+
+    grains = analysis["grains"]
+    counts = {
+        label: sum(grain["label"] == label for grain in grains)
+        for label in LABELS
+    }
+    total = len(grains)
+    lengths = [grain["length_mm"] for grain in grains]
+    widths = [grain["width_mm"] for grain in grains]
+    percent = {
+        label: round(count / total * 100, 1) if total else 0
+        for label, count in counts.items()
+    }
+    vector = [percent[label] / 100 for label in LABELS]
+    image_urls = {
+        "raw": scene["photo_path"],
+        "calibrated": calibrated["corrected_path"],
+        "annotated": analysis["annotated_image_path"],
+    }
+    public_image_urls = {
+        name: f"/files/{Path(image_path).relative_to(DATA_DIR).as_posix()}"
+        for name, image_path in image_urls.items()
+    }
+    batch = {
+        "batch_id": batch_id,
+        "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "sample_name": request.sample_name.strip(),
+        "variety": request.variety.strip(),
+        "lighting": request.lighting,
+        "simulated": True,
+        "images": public_image_urls,
+        "calibration": {
+            "patch_error_before": calibrated["patch_error_before"],
+            "patch_error_after": calibrated["patch_error_after"],
+        },
+        "grains": grains,
+        "summary": {
+            "total_grains": total,
+            "counts": counts,
+            "percent": percent,
+            "mean_length_mm": round(mean(lengths), 2) if lengths else 0,
+            "std_length_mm": round(pstdev(lengths), 2) if len(lengths) > 1 else 0,
+            "mean_width_mm": round(mean(widths), 2) if widths else 0,
+            "mean_lb_ratio": round(mean(grain["lb_ratio"] for grain in grains), 2)
+            if grains
+            else 0,
+            "mean_confidence": round(
+                mean(grain["confidence"] for grain in grains), 3
+            )
+            if grains
+            else 0,
+            "low_confidence_count": sum(
+                grain["low_confidence"] for grain in grains
+            ),
+        },
+        "fingerprint": {
+            "vector": vector,
+            "hash": hashlib.sha256(json.dumps(vector).encode()).hexdigest(),
+        },
+        "validation": validation,
+    }
+    (batch_dir / "batch.json").write_text(
+        json.dumps(batch, indent=2), encoding="utf-8"
+    )
+    save_batch(batch, DATABASE_PATH)
+    return batch
+
 
 app = FastAPI(title="Agri Scan (SIMULATED HARDWARE DEMO)")
 app.add_middleware(
@@ -207,40 +321,45 @@ def health() -> dict[str, str]:
 
 
 @app.post("/api/scan")
-def scan(request: ScanRequest) -> dict:
-    if os.getenv("MOCK", "0") != "1":
-        raise HTTPException(
-            status_code=503,
-            detail="Mock mode is not enabled. Set MOCK=1 to run the simulated demo.",
-        )
+def scan(request: ScanRequest):
     try:
-        return _make_batch(request)
+        if os.getenv("MOCK", "0") == "1":
+            return _make_mock_batch(request)
+        return _make_real_batch(request)
     except Exception as exc:
-        raise HTTPException(
+        return JSONResponse(
             status_code=500,
-            detail=f"The simulated scan could not be completed: {exc}",
-        ) from exc
+            content={
+                "error": "scan_failed",
+                "detail": f"The simulated scan could not be completed: {exc}",
+            },
+        )
 
 
 @app.get("/api/batches")
 def batches() -> list[dict]:
-    results = []
-    for path in sorted(
-        (DATA_DIR / "batches").glob("AS-*/batch.json"), reverse=True
-    ):
+    results = {batch["batch_id"]: batch for batch in list_batches(DATABASE_PATH)}
+    legacy_directory = DATA_DIR / "batches"
+    for path in legacy_directory.glob("AS-*/batch.json"):
         try:
-            results.append(json.loads(path.read_text(encoding="utf-8")))
+            batch = json.loads(path.read_text(encoding="utf-8"))
+            results.setdefault(batch["batch_id"], batch)
         except (OSError, json.JSONDecodeError):
             continue
-    return results
+    return sorted(results.values(), key=lambda batch: batch["created_at"], reverse=True)
 
 
 @app.get("/api/batches/{batch_id}")
 def get_batch(batch_id: str) -> dict:
-    path = DATA_DIR / "batches" / batch_id / "batch.json"
-    if not path.is_file() or Path(batch_id).name != batch_id:
+    if Path(batch_id).name != batch_id:
         raise HTTPException(status_code=404, detail="Batch not found")
-    return json.loads(path.read_text(encoding="utf-8"))
+    batch = read_batch(batch_id, DATABASE_PATH)
+    if batch is not None:
+        return batch
+    path = DATA_DIR / "batches" / batch_id / "batch.json"
+    if path.is_file():
+        return json.loads(path.read_text(encoding="utf-8"))
+    raise HTTPException(status_code=404, detail="Batch not found")
 
 
 app.mount("/files", StaticFiles(directory=DATA_DIR), name="files")
