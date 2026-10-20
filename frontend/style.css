@@ -312,8 +312,8 @@ button { cursor: pointer; }
 }
 
 .step-label {
-	padding-right: 12px;
-	background: transparent;
+	padding: 0 8px;
+	background: rgba(255, 252, 247, 0.96);
 	font-size: 13px;
 	font-weight: 650;
 	white-space: nowrap;
