@@ -70,6 +70,20 @@
 		document.querySelector("#chamber-figure").hidden = uploading;
 		document.querySelector("#grain-count-field").hidden = uploading;
 		document.querySelector("#scan-button .button-label").textContent = uploading ? "Analyze photo" : "Pour rice and scan";
+		document.querySelectorAll("[data-source]").forEach((card) => {
+			card.classList.toggle("is-selected", card.dataset.source === scanSource.value);
+		});
+	}
+
+	function setLightingChoice(value) {
+		const lighting = document.querySelector("#lighting");
+		lighting.value = value;
+		document.querySelectorAll("[data-lighting]").forEach((card) => {
+			card.classList.toggle("is-selected", card.dataset.lighting === value);
+		});
+		if (window.Chamber && typeof window.Chamber.setLighting === "function") {
+			window.Chamber.setLighting(value);
+		}
 	}
 
 	function setLoading(loading) {
@@ -128,8 +142,11 @@
 
 	function renderDetectionCounters() {
 		document.querySelector("#total-grains").textContent = String(detectedCount);
+		const total = Math.max(1, detectedCount);
 		for (const { key } of categories) {
 			document.querySelector(`#count-${key}`).textContent = String(detectedByClass[key]);
+			const bar = document.querySelector(`#bar-${key}`);
+			if (bar) bar.style.width = `${Math.round((detectedByClass[key] / total) * 100)}%`;
 		}
 	}
 
@@ -190,7 +207,7 @@
 		detectedCount = 0;
 		detectedByClass = Object.fromEntries(categories.map(({ key }) => [key, 0]));
 		batch.grains.sort((left, right) => left.center[0] - right.center[0]);
-		document.querySelector("#quality-list").innerHTML = categories.map(({ key, label, css }) => `<div class="quality-row"><i class="legend-dot ${css}"></i><span>${label}</span><strong id="count-${key}">0</strong></div>`).join("");
+		document.querySelector("#quality-list").innerHTML = categories.map(({ key, label, css }) => `<div class="quality-row"><i class="legend-dot ${css}"></i><div class="quality-meta"><span>${label}</span><span class="quality-track ${key}"><i id="bar-${key}"></i></span></div><strong id="count-${key}">0</strong></div>`).join("");
 		renderDetectionCounters();
 		image.onload = () => {
 			calibratedPhoto = image;
@@ -274,6 +291,7 @@
 		document.querySelector("#report-batch").textContent = batch.batch_id;
 		document.querySelector("#report-date").textContent = Number.isNaN(created.valueOf()) ? "Date unavailable" : created.toLocaleString();
 		document.querySelector("#identity-batch").textContent = batch.batch_id;
+		document.querySelector("#fingerprint-hash").textContent = batch.fingerprint?.hash || "—";
 		document.querySelector("#mean-length").textContent = Number(summary.mean_length_mm).toFixed(2);
 		document.querySelector("#mean-width").textContent = Number(summary.mean_width_mm).toFixed(2);
 		document.querySelector("#summary-good").textContent = `${summary.percent.good ?? 0}%`;
@@ -498,6 +516,15 @@
 	});
 	document.querySelector("#comparison-range").addEventListener("input", (event) => updateComparison(event.currentTarget.value));
 	scanSource.addEventListener("change", updateScanSource);
+	document.querySelectorAll("[data-source]").forEach((card) => {
+		card.addEventListener("click", () => {
+			scanSource.value = card.dataset.source;
+			updateScanSource();
+		});
+	});
+	document.querySelectorAll("[data-lighting]").forEach((card) => {
+		card.addEventListener("click", () => setLightingChoice(card.dataset.lighting));
+	});
 	photoInput.addEventListener("change", () => {
 		if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl);
 		photoPreviewUrl = null;
@@ -598,6 +625,7 @@
 		furthestStep = 1;
 		form.reset();
 		updateScanSource();
+		setLightingChoice(document.querySelector("#lighting").value);
 		if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl);
 		photoPreviewUrl = null;
 		document.querySelector("#photo-preview").hidden = true;
