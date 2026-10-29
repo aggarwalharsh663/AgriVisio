@@ -312,10 +312,14 @@
 		document.querySelector("#summary-good").textContent = `${summary.percent.good ?? 0}%`;
 		document.querySelector("#mean-confidence").textContent = `${Math.round(Number(summary.mean_confidence || 0) * 100)}%`;
 		const lowConf = Number(summary.low_confidence_count || 0);
-		document.querySelector("#confidence-warning").hidden = !(lowConf > 0);
-		if (lowConf > 0) {
-			const label = lowConf === 1 ? "1 grain flagged for review" : `${lowConf} grains flagged for review`;
-			document.querySelector("#warning-count").textContent = `${label} (below confidence threshold). You can inspect and sort them in the grain details table below.`;
+		const total = Number(summary.total_grains || 1);
+		const flagRatio = lowConf / total;
+		// Only trigger the alert banner if a notable proportion (>15%) is low-confidence or overall confidence is low (<75%)
+		const shouldWarn = flagRatio > 0.15 || Number(summary.mean_confidence || 1) < 0.75;
+		document.querySelector("#confidence-warning").hidden = !shouldWarn;
+		if (shouldWarn) {
+			const pct = Math.round(flagRatio * 100);
+			document.querySelector("#warning-count").textContent = `${lowConf} grains (${pct}% of sample) have borderline optical confidence. You can inspect and sort them in the grain details table below.`;
 		}
 		document.querySelector("#report-legend").innerHTML = categories.map(({ key, label, css }) => `<div class="quality-row"><i class="legend-dot ${css}"></i><span>${label} · ${summary.percent[key] ?? 0}%</span><strong>${summary.counts[key] ?? 0}</strong></div>`).join("");
 		document.querySelector("#mean-length-note").textContent = uploadedPhoto ? "estimated mm · assumed scale" : "millimetres";

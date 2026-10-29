@@ -24,7 +24,7 @@ import numpy as np
 W, H = 1280, 960                 # image size in pixels
 MM_PER_PIXEL = 0.12              # simulated camera scale (known ground truth)
 
-# 12 reference patches (same colours as the printed card in the prompt pack)
+# 12 reference patches (same colours as the printed card in the reference specification)
 CARD_COLORS = [
     (255, 255, 255), (200, 200, 200), (128, 128, 128), (30, 30, 30),
     (200, 30, 30), (30, 160, 50), (30, 60, 200), (230, 210, 40),
