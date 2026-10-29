@@ -187,23 +187,17 @@ body {
 .brand {
 	display: inline-flex;
 	align-items: center;
-	gap: 10px;
+	gap: 12px;
 	text-decoration: none;
 	color: var(--text-title);
 }
 
-.brand-mark {
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	width: 34px;
-	height: 34px;
-	color: var(--primary);
-}
-
-.brand-mark svg {
-	width: 100%;
-	height: 100%;
+.brand-emblem-img {
+	width: 38px;
+	height: 38px;
+	object-fit: contain;
+	display: block;
+	filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.2));
 }
 
 .brand-text {
