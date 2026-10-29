@@ -11,3 +11,4 @@ qrcode
 pillow
 pytest
 httpx
+pywebview

@@ -110,6 +110,17 @@ pip install -r requirements.txt
 
 ### 3. Launch the Application
 
+#### A. Launch as Standalone Windows Desktop App (Recommended)
+You can launch AgriScan as a native Windows desktop application with zero console windows:
+- **Desktop Shortcut**: Double-click the **`AgriScan`** shortcut created on your Windows Desktop.
+- **VBScript**: Double-click **`AgriScan.vbs`** (launches windowless in native WebView2).
+- **Batch Launcher**: Run **`start_app.bat`**.
+- **CLI**:
+  ```powershell
+  .\.venv\Scripts\python.exe app_desktop.py
+  ```
+
+#### B. Launch in Web Browser Mode
 Start the FastAPI application with Uvicorn:
 
 ```powershell
