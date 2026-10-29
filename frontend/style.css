@@ -4,6 +4,55 @@
    Aesthetic: Neo-Brutalist Technical Editorial (Zero Blueprint Grid Lines)
    ========================================================================== */
 
+/* Global Splash Overlay */
+.app-splash {
+	position: fixed;
+	inset: 0;
+	z-index: 99999;
+	background: #0d0f14;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	transition: opacity 0.35s ease, visibility 0.35s ease;
+}
+.app-splash.is-loaded {
+	opacity: 0;
+	visibility: hidden;
+	pointer-events: none;
+}
+.splash-box {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 16px;
+}
+.splash-logo {
+	max-width: 280px;
+	height: auto;
+	filter: drop-shadow(0 10px 24px rgba(0,0,0,0.6));
+}
+.splash-track {
+	width: 220px;
+	height: 6px;
+	background: #171b26;
+	border: 1.5px solid #2d354d;
+	border-radius: 999px;
+	overflow: hidden;
+}
+.splash-bar {
+	width: 100%;
+	height: 100%;
+	background: var(--primary);
+	border-radius: 999px;
+}
+.splash-note {
+	font-family: var(--font-mono);
+	font-size: 11px;
+	font-weight: 800;
+	letter-spacing: 0.1em;
+	color: #94a3b8;
+}
+
 /* Strict Global Hidden Rules */
 [hidden],
 .field[hidden],

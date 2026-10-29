@@ -1,0 +1,20 @@
+{
+  "name": "AgriScan - Precision Optical Grain Assessment",
+  "short_name": "AgriScan",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0d0f14",
+  "theme_color": "#f7f5ed",
+  "icons": [
+    {
+      "src": "/assets/emblem.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/assets/emblem.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
