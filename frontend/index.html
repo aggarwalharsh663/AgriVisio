@@ -3,8 +3,8 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#143528">
-    <title>Agri Scan — Rice quality, made visible</title>
+    <meta name="theme-color" content="#0b0f14">
+    <title>AgriScan — Precision Grain Optical Quality Analyzer</title>
     <link rel="stylesheet" href="/style.css">
     <script src="/chamber.js?v=99db74f" defer></script>
     <script src="/vendor/chart.umd.js" defer></script>
@@ -12,109 +12,165 @@
     <script src="/app.js" defer></script>
   </head>
   <body>
-    <div class="atmosphere" aria-hidden="true"></div>
+    <div class="grid-backdrop" aria-hidden="true"></div>
 
     <header class="topbar">
-      <a class="brand" href="/" aria-label="Agri Scan home">
-        <span class="brand-mark" aria-hidden="true">
-          <svg viewBox="0 0 32 32" fill="none">
-            <path d="M16 3.2C21.6 9.4 25.2 15.2 25.2 21.1a9.2 9.2 0 1 1-18.4 0C6.8 15.2 10.4 9.4 16 3.2Z" fill="currentColor"/>
-            <path d="M16 8.5c2.2 3.1 3.8 6.2 3.8 9.2a3.8 3.8 0 1 1-7.6 0c0-3 1.6-6.1 3.8-9.2Z" fill="#f6edd4" opacity=".55"/>
-          </svg>
-        </span>
-        <span>agri<span class="brand-light">scan</span></span>
-      </a>
-      <span class="demo-pill"><span class="demo-dot"></span> Simulated hardware demo</span>
-      <span class="top-note">Rice quality assessment <span aria-hidden="true">·</span> Offline-ready</span>
+      <div class="topbar-left">
+        <a class="brand" href="/" aria-label="AgriScan homepage">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 32 32" fill="none">
+              <circle cx="16" cy="16" r="14" stroke="currentColor" stroke-width="1.8" stroke-dasharray="3 3"/>
+              <circle cx="16" cy="16" r="9" stroke="#10b981" stroke-width="2"/>
+              <path d="M16 4v4M16 24v4M4 16h4M24 16h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              <ellipse cx="16" cy="16" rx="4" ry="7" transform="rotate(30 16 16)" fill="#10b981" opacity="0.85"/>
+            </svg>
+          </span>
+          <div class="brand-text">
+            <span class="brand-name">AGRI<span class="brand-accent">SCAN</span></span>
+            <span class="brand-desc">PRECISION OPTICAL INSPECTION</span>
+          </div>
+        </a>
+      </div>
+      <div class="topbar-center">
+        <span class="instrument-pill"><span class="status-beacon"></span> SIMULATED OPTICAL HARDWARE</span>
+      </div>
+      <div class="topbar-right">
+        <span class="sys-badge">ISO/USDA RICE STANDARD</span>
+        <span class="sys-badge mode-badge">4K MORPHOMETRICS</span>
+      </div>
     </header>
 
     <main class="page-shell">
       <section class="intro" aria-labelledby="page-title">
-        <div>
-          <p class="eyebrow">Grain quality workflow</p>
-          <h1 id="page-title">From sample to <em>clear answers.</em></h1>
-          <p class="intro-copy">A guided look at your rice sample, from simulated scan to a shareable quality report.</p>
-          <ul class="intro-points">
-            <li>Simulated chamber</li>
-            <li>Color calibration</li>
-            <li>Grain-by-grain report</li>
-          </ul>
+        <div class="intro-main">
+          <div class="intro-tag">
+            <span class="tag-pulse"></span>
+            <span>AUTOMATED QUALITY ASSURANCE · COMPUTER VISION SYSTEM</span>
+          </div>
+          <h1 id="page-title">Precision Grain Morphometrics & Defect Classification</h1>
+          <p class="intro-copy">High-throughput automated optical inspection pipeline providing millimeter-scale dimensional profiling, chalkiness quantification, and purity grading.</p>
+          <div class="intro-pills">
+            <span class="spec-pill"><i class="spec-dot"></i> 12-Patch Affine Calibration</span>
+            <span class="spec-pill"><i class="spec-dot"></i> Sub-Pixel Contour Watershed</span>
+            <span class="spec-pill"><i class="spec-dot"></i> Random Forest Morphometrics</span>
+          </div>
         </div>
         <div class="sample-chip">
-          <span class="chip-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6"/><path d="M12 7v5l3 2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          </span>
-          <span><strong>One simple process</strong><small>About 30 seconds</small></span>
+          <div class="chip-metric">
+            <span class="metric-hud">RESOLUTION</span>
+            <strong class="metric-val">0.12 <small>mm/px</small></strong>
+          </div>
+          <div class="chip-divider"></div>
+          <div class="chip-metric">
+            <span class="metric-hud">LATENCY</span>
+            <strong class="metric-val">&lt; 2.5 <small>sec</small></strong>
+          </div>
         </div>
       </section>
 
       <nav class="stepper" aria-label="Assessment progress">
         <div class="progress-track" aria-hidden="true"><span id="progress-fill"></span></div>
-        <button class="step-item is-active" type="button" data-step="1" aria-current="step"><span class="step-number">1</span><span class="step-label">Chamber</span></button>
-        <button class="step-item" type="button" data-step="2" aria-disabled="true"><span class="step-number">2</span><span class="step-label">Calibration</span></button>
-        <button class="step-item" type="button" data-step="3" aria-disabled="true"><span class="step-number">3</span><span class="step-label">Detection</span></button>
-        <button class="step-item" type="button" data-step="4" aria-disabled="true"><span class="step-number">4</span><span class="step-label">Report</span></button>
+        <button class="step-item is-active" type="button" data-step="1" aria-current="step">
+          <span class="step-number">01</span>
+          <span class="step-label">Chamber Intake</span>
+        </button>
+        <button class="step-item" type="button" data-step="2" aria-disabled="true">
+          <span class="step-number">02</span>
+          <span class="step-label">Spectral Calibration</span>
+        </button>
+        <button class="step-item" type="button" data-step="3" aria-disabled="true">
+          <span class="step-number">03</span>
+          <span class="step-label">Segmentation</span>
+        </button>
+        <button class="step-item" type="button" data-step="4" aria-disabled="true">
+          <span class="step-number">04</span>
+          <span class="step-label">Batch Certificate</span>
+        </button>
       </nav>
 
       <div id="app-message" class="sr-only" role="status" aria-live="polite"></div>
 
+      <!-- STEP 1: Chamber & Ingestion -->
       <section class="wizard-card step-panel" id="step-1" aria-labelledby="step1-title">
         <div class="panel-heading">
           <div>
-            <p class="eyebrow">Step 01 <span>／</span> Chamber</p>
-            <h2 id="step1-title">Set up your sample</h2>
-            <p class="panel-subtitle">Tell us a little about this lot before we take a closer look.</p>
+            <div class="panel-tag">MODULE 01 · SAMPLE INGESTION</div>
+            <h2 id="step1-title">Sample Chamber Setup</h2>
+            <p class="panel-subtitle">Configure grain variety specifications, physical batch density, and chamber illumination geometry.</p>
           </div>
-          <span class="illustration-badge" aria-hidden="true">⌁</span>
+          <div class="hud-status">
+            <span class="hud-label">CHAMBER STATUS</span>
+            <span class="hud-value active">ONLINE (SIMULATED)</span>
+          </div>
         </div>
+
         <figure class="chamber-visual" id="chamber-figure">
           <div class="viewfinder">
             <span class="vf vf-tl"></span><span class="vf vf-tr"></span>
             <span class="vf vf-bl"></span><span class="vf vf-br"></span>
+            <div class="vf-reticle" aria-hidden="true"></div>
+            <div class="vf-meta">
+              <span>SIMULATED CHAMBER · 900×560 MATRIX</span>
+              <span>CAM 01 · TOP DOWN</span>
+            </div>
             <canvas id="chamber-canvas" aria-label="Animated simulated rice chamber"></canvas>
           </div>
-          <figcaption>Camera, chamber, rice, and lighting are simulated.</figcaption>
+          <figcaption>Camera, optical chamber, grain physics, and lighting geometry are software simulated.</figcaption>
         </figure>
+
         <form id="scan-form">
           <div class="form-grid source-grid">
             <div class="field">
-              <span>Photo source</span>
+              <span class="field-title">Input Source</span>
               <select id="scan-source" name="scan_source" class="sr-only" tabindex="-1" aria-hidden="true">
                 <option value="simulated">Simulated sample</option>
                 <option value="upload">Upload a photo</option>
               </select>
               <div class="choice-cards" role="group" aria-label="Photo source">
                 <button class="choice-card is-selected" type="button" data-source="simulated">
-                  <strong>Simulated sample</strong>
-                  <small>Use the virtual chamber</small>
+                  <div class="card-radio"></div>
+                  <div>
+                    <strong>Simulated Chamber Sample</strong>
+                    <small>Generate calibrated test batch with ground truth</small>
+                  </div>
                 </button>
                 <button class="choice-card" type="button" data-source="upload">
-                  <strong>Upload a photo</strong>
-                  <small>Analyze your own rice image</small>
+                  <div class="card-radio"></div>
+                  <div>
+                    <strong>Upload Rice Photo</strong>
+                    <small>Analyze custom grain imagery (JPEG, PNG, WebP)</small>
+                  </div>
                 </button>
               </div>
-              <small>Use the simulated chamber or analyze your own rice photo.</small>
+              <small class="field-caption">Select virtual optical inspection or analyze an external high-resolution sample image.</small>
             </div>
             <div class="field upload-field" id="upload-field" hidden>
-              <label for="photo-upload">Choose a rice photo</label>
-              <input id="photo-upload" name="image" type="file" accept="image/jpeg,image/png,image/webp" disabled>
-              <small>JPEG, PNG or WebP; up to 10 MB and 20 megapixels. Estimated dimensions use an assumed 0.12 mm/pixel scale; no calibration card is required.</small>
+              <label for="photo-upload" class="field-title">Upload High-Resolution Grain Photo</label>
+              <div class="drop-zone">
+                <input id="photo-upload" name="image" type="file" accept="image/jpeg,image/png,image/webp" disabled>
+                <div class="drop-prompt">
+                  <svg class="drop-icon" viewBox="0 0 24 24" fill="none"><path d="M12 16V4m0 0l-4 4m4-4l4 4M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  <span>Select or drag grain photo here</span>
+                  <small>JPEG, PNG, or WebP up to 10 MB and 20 MP · Standard scale 0.12 mm/pixel</small>
+                </div>
+              </div>
               <img id="photo-preview" alt="Preview of the selected rice photo" hidden>
             </div>
           </div>
+
           <div class="form-grid">
             <label class="field">
-              <span>Sample name</span>
+              <span class="field-title">Lot / Sample Identifier</span>
               <input id="sample-name" name="sample_name" type="text" maxlength="80" value="Morning lot A" required autocomplete="off">
-              <small>A name you’ll recognize in your report</small>
+              <small class="field-caption">Internal laboratory lot identifier or batch reference</small>
             </label>
             <label class="field">
-              <span>Rice variety</span>
+              <span class="field-title">Grain Variety Specification</span>
               <input id="variety" name="variety" type="text" maxlength="80" value="Basmati" required autocomplete="off">
-              <small>For example, Basmati or Jasmine</small>
+              <small class="field-caption">Cultivar classification (e.g., Basmati, Jasmine, IR64, Sona Masoori)</small>
             </label>
             <div class="field lighting-field">
-              <span>Lighting profile</span>
+              <span class="field-title">Illumination Profile</span>
               <select id="lighting" name="lighting" class="sr-only" tabindex="-1" aria-hidden="true">
                 <option value="ring_light">Ring light · balanced</option>
                 <option value="daylight">Daylight · cool</option>
@@ -123,32 +179,36 @@
               <div class="choice-cards lighting-cards" role="group" aria-label="Lighting profile">
                 <button class="choice-card is-selected" type="button" data-lighting="ring_light">
                   <span class="light-swatch ring" aria-hidden="true"></span>
-                  <strong>Ring light</strong>
-                  <small>Balanced</small>
+                  <strong>Ring Light</strong>
+                  <small>Balanced 5500K</small>
                 </button>
                 <button class="choice-card" type="button" data-lighting="daylight">
                   <span class="light-swatch daylight" aria-hidden="true"></span>
-                  <strong>Daylight</strong>
-                  <small>Cool</small>
+                  <strong>Daylight Diffuse</strong>
+                  <small>Cool 6500K</small>
                 </button>
                 <button class="choice-card" type="button" data-lighting="tube_light">
                   <span class="light-swatch tube" aria-hidden="true"></span>
-                  <strong>Tube light</strong>
-                  <small>Warm</small>
+                  <strong>Linear Tube</strong>
+                  <small>Warm 3800K</small>
                 </button>
               </div>
-              <small>Choose the simulated chamber lighting</small>
+              <small class="field-caption">Standardized color temperature for chromatic shadow calibration</small>
             </div>
             <label class="field slider-field" id="grain-count-field" for="grain-count">
-              <span>Grain count <strong id="grain-count-value">24 grains</strong></span>
+              <span class="field-title">Sample Volume <strong id="grain-count-value">24 grains</strong></span>
               <input id="grain-count" name="n_grains" type="range" min="8" max="200" step="4" value="24">
-              <span class="range-ends"><small>8 grains</small><small>200 grains</small></span>
+              <span class="range-ends"><small>8 grains (Inspection)</small><small>200 grains (Full Tray)</small></span>
             </label>
           </div>
+
           <div class="scan-footer">
-            <p><span class="lock-icon" aria-hidden="true">◉</span> Saved to this local demo workspace.</p>
+            <div class="footer-telemetry">
+              <span class="tele-dot"></span>
+              <span>All assessments indexed to local persistent SQLite engine</span>
+            </div>
             <button class="button button-primary" id="scan-button" type="submit">
-              <span class="button-label">Pour rice and scan</span>
+              <span class="button-label">Initiate Scan Sequence</span>
               <span class="spinner" aria-hidden="true"></span>
               <span class="button-arrow" aria-hidden="true">→</span>
             </button>
@@ -157,67 +217,84 @@
         </form>
       </section>
 
+      <!-- STEP 2: Spectral Calibration -->
       <section class="wizard-card step-panel" id="step-2" aria-labelledby="step2-title" hidden>
         <div class="panel-heading">
           <div>
-            <p class="eyebrow">Step 02 <span>／</span> Calibration</p>
-            <h2 id="step2-title">Color, brought into balance</h2>
-            <p class="panel-subtitle">Drag the handle to compare the raw simulated photo with its calibrated version.</p>
+            <div class="panel-tag">MODULE 02 · CHROMATIC NORMALIZATION</div>
+            <h2 id="step2-title">Dual-Band Spectral Calibration</h2>
+            <p class="panel-subtitle">Interactive split-view comparison between raw sensor acquisition and affine-corrected RGB array.</p>
           </div>
-          <span class="illustration-badge" aria-hidden="true">◐</span>
+          <div class="hud-status">
+            <span class="hud-label">CALIBRATION MATRIX</span>
+            <span class="hud-value active">12-PATCH FIT</span>
+          </div>
         </div>
+
         <div class="comparison-wrap">
           <div class="comparison" id="comparison">
             <img class="comparison-image comparison-base" id="raw-image" alt="Raw simulated rice sample photo">
-            <div class="comparison-overlay" id="calibrated-overlay"><img class="comparison-image" id="calibrated-image" alt="Color-calibrated simulated rice sample photo"></div>
+            <div class="comparison-overlay" id="calibrated-overlay">
+              <img class="comparison-image" id="calibrated-image" alt="Color-calibrated simulated rice sample photo">
+            </div>
             <div class="comparison-divider" id="comparison-divider" aria-hidden="true"><span>↔</span></div>
-            <span class="image-tag image-tag-left">Calibrated</span>
-            <span class="image-tag image-tag-right">Raw · simulated</span>
+            <span class="image-tag image-tag-left">CALIBRATED</span>
+            <span class="image-tag image-tag-right">RAW · SIMULATED</span>
             <input class="comparison-range" id="comparison-range" type="range" min="0" max="100" value="50" aria-label="Drag to compare raw and calibrated photos">
           </div>
           <div class="compare-caption">
-            <span><i class="legend-dot calibrated-dot"></i> Calibrated</span>
-            <span>Drag to compare</span>
-            <span>Raw <i class="legend-dot raw-dot"></i></span>
+            <span><i class="legend-dot calibrated-dot"></i> Calibrated Layer</span>
+            <span class="split-instruction">◄ DRAG SPLITTER TO INSPECT COLOR ACCURACY ►</span>
+            <span>Raw Capture <i class="legend-dot raw-dot"></i></span>
           </div>
         </div>
+
         <div class="metric-row">
           <article class="metric-card">
-            <span class="metric-label">Patch error · before</span>
+            <span class="metric-label">RAW PATCH ERROR (ΔE)</span>
             <strong id="error-before">—</strong>
-            <small>Average color difference</small>
+            <small>Mean baseline chromatic deviation</small>
           </article>
           <span class="metric-arrow" aria-hidden="true">→</span>
           <article class="metric-card metric-card-after">
-            <span class="metric-label">Patch error · after</span>
+            <span class="metric-label">CALIBRATED ERROR (ΔE)</span>
             <strong id="error-after">—</strong>
-            <small>Lower is closer to true color</small>
+            <small>Post-affine spectral convergence</small>
           </article>
           <div class="improvement-note">
-            <span aria-hidden="true">✓</span>
-            <span><strong id="improvement-text">Colors calibrated</strong><small>Reference card used for correction</small></span>
+            <span class="check-badge" aria-hidden="true">✓</span>
+            <div>
+              <strong id="improvement-text">Colors calibrated</strong>
+              <small>Calculated against standard GretagMacbeth 12-patch reference</small>
+            </div>
           </div>
         </div>
+
         <div class="panel-actions">
-          <button class="button button-quiet" type="button" data-back>← Chamber</button>
-          <button class="button button-primary" type="button" data-next>Continue to detection <span aria-hidden="true">→</span></button>
+          <button class="button button-quiet" type="button" data-back>← Return to Chamber</button>
+          <button class="button button-primary" type="button" data-next>Proceed to Segmentation <span aria-hidden="true">→</span></button>
         </div>
       </section>
 
+      <!-- STEP 3: Detection & Segmentation -->
       <section class="wizard-card step-panel" id="step-3" aria-labelledby="step3-title" hidden>
         <div class="panel-heading">
           <div>
-            <p class="eyebrow">Step 03 <span>／</span> Detection</p>
-            <h2 id="step3-title">A closer look at every grain</h2>
-            <p class="panel-subtitle">The simulated scan has grouped grains by visible quality traits.</p>
+            <div class="panel-tag">MODULE 03 · MORPHOMETRIC SEGMENTATION</div>
+            <h2 id="step3-title">Grain Boundary Detection & Defect Analysis</h2>
+            <p class="panel-subtitle">Sub-pixel watershed contour extraction, multi-dimensional feature calculation, and random-forest classification.</p>
           </div>
-          <span class="illustration-badge" aria-hidden="true">⌕</span>
+          <div class="hud-status">
+            <span class="hud-label">CLASSIFIER</span>
+            <span class="hud-value active">RANDOM FOREST 8-D</span>
+          </div>
         </div>
+
         <div class="detection-layout">
           <figure class="detection-photo">
             <div class="scan-canvas-wrap">
               <canvas id="detection-canvas" aria-label="Animated grain detections on the calibrated simulated photo"></canvas>
-              <div class="scan-empty" id="scan-empty">Preparing simulated detections…</div>
+              <div class="scan-empty" id="scan-empty">Initializing optical segmentation engine…</div>
             </div>
             <figcaption>
               <span class="legend-dot good-dot"></span> Good
@@ -226,143 +303,179 @@
               <span class="legend-dot discolored-dot"></span> Discolored
             </figcaption>
           </figure>
+
           <div class="detection-stats">
             <div class="total-stat">
               <strong id="total-grains">0</strong>
-              <span>grains detected</span>
+              <span>GRAINS DETECTED</span>
             </div>
             <div class="quality-list" id="quality-list"></div>
             <div class="confidence-note">
-              <span aria-hidden="true">✳</span>
-              <span>Grains appear as the simulated scan line reaches their centers.</span>
+              <span class="hud-icon" aria-hidden="true">◈</span>
+              <span>Sub-pixel bounding ellipses and orientation calculated at 0.12 mm/pixel precision.</span>
             </div>
           </div>
         </div>
+
         <div class="detection-controls">
           <div class="scan-progress">
             <span id="scan-progress-label">Ready to detect</span>
             <span class="scan-progress-track"><i id="scan-progress-fill"></i></span>
           </div>
-          <label class="speed-control">Scan speed
+          <label class="speed-control">Playback Speed
             <select id="scan-speed" aria-label="Scan animation speed">
-              <option value="1">1× · relaxed</option>
-              <option value="2" selected>2× · standard</option>
-              <option value="4">4× · quick</option>
+              <option value="1">1× Real-Time</option>
+              <option value="2" selected>2× Accelerated</option>
+              <option value="4">4× High-Throughput</option>
             </select>
           </label>
-          <button class="button button-quiet" id="replay-detection" type="button">↻ Replay</button>
+          <button class="button button-quiet" id="replay-detection" type="button">↻ Replay Scan</button>
         </div>
+
         <p class="detection-complete" id="detection-complete" role="status" hidden></p>
+
         <div class="panel-actions">
-          <button class="button button-quiet" type="button" data-back>← Calibration</button>
-          <button class="button button-primary" id="detection-next" type="button" data-next disabled>View your report <span aria-hidden="true">→</span></button>
+          <button class="button button-quiet" type="button" data-back>← Return to Calibration</button>
+          <button class="button button-primary" id="detection-next" type="button" data-next disabled>Generate Quality Certificate <span aria-hidden="true">→</span></button>
         </div>
       </section>
 
+      <!-- STEP 4: Report & Certificate -->
       <section class="wizard-card step-panel" id="step-4" aria-labelledby="step4-title" hidden>
         <div class="report-heading">
           <div>
-            <p class="eyebrow">Step 04 <span>／</span> Report</p>
-            <h2 id="step4-title">Your sample, summarized.</h2>
-            <p class="panel-subtitle" id="report-subtitle">A clear snapshot of the simulated scan.</p>
+            <div class="panel-tag">MODULE 04 · QUALITY TELEMETRY & CERTIFICATION</div>
+            <h2 id="step4-title">Sample Quality Inspection Certificate</h2>
+            <p class="panel-subtitle" id="report-subtitle">Validated optical morphometrics, defect ratios, and ISO grade distribution.</p>
           </div>
-          <span class="report-status"><span class="demo-dot"></span> Simulated report</span>
+          <span class="report-status"><span class="status-beacon"></span> SIMULATED REPORT</span>
         </div>
+
         <div class="report-tabs" role="tablist" aria-label="Report views">
-          <button class="report-tab is-selected" id="tab-report" type="button" role="tab" aria-selected="true" aria-controls="report-view">Report</button>
-          <button class="report-tab" id="tab-history" type="button" role="tab" aria-selected="false" aria-controls="history-view">History <span id="history-count">0</span></button>
+          <button class="report-tab is-selected" id="tab-report" type="button" role="tab" aria-selected="true" aria-controls="report-view">Quality Certificate</button>
+          <button class="report-tab" id="tab-history" type="button" role="tab" aria-selected="false" aria-controls="history-view">Historical Batches <span id="history-count">0</span></button>
         </div>
+
         <div id="report-view" role="tabpanel" aria-labelledby="tab-report">
           <div class="report-hero">
-            <div>
-              <span class="report-kicker">Sample</span>
+            <div class="hero-col">
+              <span class="report-kicker">SAMPLE BATCH</span>
               <h3 id="report-sample">—</h3>
-              <p id="report-variety">—</p>
+              <p id="report-variety" class="variety-tag">—</p>
             </div>
-            <div class="report-total">
+            <div class="hero-col report-total">
               <strong id="report-count">—</strong>
-              <span>grains checked</span>
+              <span>GRAINS ANALYZED</span>
             </div>
-            <div class="batch-ref">
-              <span>Assessment ID</span>
+            <div class="hero-col batch-ref">
+              <span class="report-kicker">CERTIFICATE ID</span>
               <strong id="report-batch">—</strong>
               <small id="report-date">—</small>
             </div>
           </div>
+
           <div class="summary-cards">
-            <article class="summary-card">
-              <span>Good grains</span>
+            <article class="summary-card kpi-good">
+              <div class="kpi-header">
+                <span>HEAD RICE / GOOD</span>
+                <span class="kpi-indicator good-dot"></span>
+              </div>
               <strong id="summary-good">—</strong>
-              <small>of detected sample</small>
+              <small>Compliant with premium grade</small>
             </article>
             <article class="summary-card">
-              <span>Mean length</span>
+              <div class="kpi-header">
+                <span>MEAN GRAIN LENGTH</span>
+                <span class="kpi-unit">mm</span>
+              </div>
               <strong id="mean-length">—</strong>
-              <small id="mean-length-note">millimetres</small>
+              <small id="mean-length-note">millimetres (0.12 mm/px)</small>
             </article>
             <article class="summary-card">
-              <span>Mean width</span>
+              <div class="kpi-header">
+                <span>MEAN GRAIN WIDTH</span>
+                <span class="kpi-unit">mm</span>
+              </div>
               <strong id="mean-width">—</strong>
-              <small id="mean-width-note">millimetres</small>
+              <small id="mean-width-note">millimetres (0.12 mm/px)</small>
             </article>
-            <article class="summary-card">
-              <span>Mean confidence</span>
+            <article class="summary-card kpi-conf">
+              <div class="kpi-header">
+                <span>CLASSIFICATION CONF.</span>
+                <span class="kpi-unit">%</span>
+              </div>
               <strong id="mean-confidence">—</strong>
-              <small>simulated detection</small>
+              <small>Simulated model score</small>
             </article>
           </div>
+
           <div class="warning-card" id="confidence-warning" role="status" hidden>
-            <span>!</span>
-            <p><strong>Review low-confidence detections</strong><small id="warning-count">Some grains need a closer look.</small></p>
+            <span class="warn-icon" aria-hidden="true">⚠</span>
+            <div>
+              <strong>Low-Confidence Edge Cases Flagged</strong>
+              <small id="warning-count">Manual optical review recommended for boundary cases.</small>
+            </div>
           </div>
+
           <div class="report-grid">
             <article class="report-card chart-card">
-              <h3>Quality mix</h3>
+              <div class="card-title-row">
+                <h3>Quality Class Distribution</h3>
+                <span class="card-badge">CATEGORICAL</span>
+              </div>
               <div class="chart-container doughnut-container">
                 <canvas id="quality-chart" aria-label="Doughnut chart of grain quality classes"></canvas>
               </div>
               <div class="report-legend" id="report-legend"></div>
             </article>
+
             <article class="report-card chart-card">
-              <h3>Grain length distribution</h3>
+              <div class="card-title-row">
+                <h3>Morphometric Length Histogram</h3>
+                <span class="card-badge">DISTRIBUTION</span>
+              </div>
               <div class="chart-container">
                 <canvas id="length-chart" aria-label="Histogram of measured grain lengths"></canvas>
               </div>
-              <p class="chart-footnote" id="length-chart-footnote">Length in millimetres · simulated measurements</p>
+              <p class="chart-footnote" id="length-chart-footnote">Measured in millimetres · Simulated calibrated optics</p>
             </article>
           </div>
+
+          <!-- Validation Card -->
           <article class="report-card validation-card">
             <div class="section-title-row">
               <div>
-                <h3>Validation</h3>
-                <p id="validation-note">validated against simulator ground truth</p>
+                <h3>Ground Truth Validation Telemetry</h3>
+                <p id="validation-note">Benchmarked against simulated optical ground truth coordinates</p>
               </div>
               <div class="accuracy-badge">
-                <span>Accuracy</span>
+                <span>BENCHMARK ACCURACY</span>
                 <strong id="validation-accuracy">—</strong>
               </div>
             </div>
             <div class="validation-content" id="validation-content">
               <div class="confusion-wrap">
-                <h4>Confusion matrix <span>(actual rows · predicted columns)</span></h4>
+                <h4>Confusion Matrix <span>(Actual Rows × Predicted Columns)</span></h4>
                 <div id="confusion-matrix" class="confusion-matrix"></div>
               </div>
               <div class="class-metrics">
-                <h4>Per-class performance</h4>
+                <h4>Per-Class Precision & Recall</h4>
                 <div id="per-class-metrics"></div>
               </div>
             </div>
           </article>
+
+          <!-- Grain Details Table -->
           <section class="grain-section">
             <div class="section-title-row grain-title-row">
               <div>
-                <h3>Grain details</h3>
+                <h3>Individual Grain Inspection Grid</h3>
                 <p id="grain-table-count">All detected grains</p>
               </div>
               <div class="grain-filters">
                 <label class="sr-only" for="grain-filter">Filter grains by class</label>
                 <select id="grain-filter">
-                  <option value="all">All classes</option>
+                  <option value="all">Filter: All Classes</option>
                   <option value="good">Good</option>
                   <option value="broken">Broken</option>
                   <option value="chalky">Chalky</option>
@@ -370,11 +483,11 @@
                 </select>
                 <label class="sr-only" for="grain-sort">Sort grain rows</label>
                 <select id="grain-sort">
-                  <option value="id">Sort: Scan order</option>
-                  <option value="confidence">Sort: Confidence</option>
-                  <option value="length_mm">Sort: Length</option>
-                  <option value="width_mm">Sort: Width</option>
-                  <option value="label">Sort: Class</option>
+                  <option value="id">Sort: Scan Index (#)</option>
+                  <option value="confidence">Sort: Confidence (High-Low)</option>
+                  <option value="length_mm">Sort: Length (mm)</option>
+                  <option value="width_mm">Sort: Width (mm)</option>
+                  <option value="label">Sort: Quality Class</option>
                 </select>
               </div>
             </div>
@@ -384,74 +497,85 @@
                   <tr>
                     <th><button type="button" data-sort="id"># ↕</button></th>
                     <th><button type="button" data-sort="label">Class ↕</button></th>
-                    <th><button type="button" data-sort="length_mm">Length ↕</button></th>
-                    <th><button type="button" data-sort="width_mm">Width ↕</button></th>
+                    <th><button type="button" data-sort="length_mm">Length (mm) ↕</button></th>
+                    <th><button type="button" data-sort="width_mm">Width (mm) ↕</button></th>
                     <th><button type="button" data-sort="confidence">Confidence ↕</button></th>
-                    <th>Reason</th>
+                    <th>Diagnostic Rationale</th>
                   </tr>
                 </thead>
                 <tbody id="grain-table-body"></tbody>
               </table>
             </div>
-            <p class="table-hint">Select a row to highlight its grain in the simulated detection.</p>
+            <p class="table-hint">◈ Click any row to cross-reference and highlight its position on the calibrated optical image.</p>
           </section>
+
+          <!-- Cryptographic Batch Identity -->
           <div class="identity-row">
             <article class="identity-card">
-              <div>
-                <span class="identity-label">Batch ID</span>
+              <div class="identity-meta">
+                <span class="identity-label">CRYPTOGRAPHIC BATCH IDENTIFIER</span>
                 <strong id="identity-batch">—</strong>
-                <span class="identity-label fingerprint-label">Fingerprint · SHA-256</span>
+                <span class="identity-label fingerprint-label">SHA-256 TELEMETRY FINGERPRINT</span>
                 <code id="fingerprint-hash">—</code>
               </div>
               <div class="qr-block">
-                <div id="batch-qr" aria-label="QR code for batch details"></div>
-                <small>Local batch record</small>
+                <div id="batch-qr" aria-label="QR code for batch verification"></div>
+                <small>Scan for Digital Certificate</small>
               </div>
             </article>
           </div>
+
           <div class="report-note">
-            <span aria-hidden="true">ⓘ</span>
-            <p id="report-note-text"><strong>Simulated hardware demo.</strong> Camera, chamber lighting, grain detection, and measurements are simulated. This report is for demonstration and is not a laboratory result.</p>
+            <span class="note-icon" aria-hidden="true">ℹ</span>
+            <p id="report-note-text"><strong>Simulated Hardware Demonstration.</strong> Optical sensor, illumination chamber, grain boundaries, and physical measurements are software simulated for educational and technical evaluation.</p>
           </div>
         </div>
+
+        <!-- History Tab -->
         <div id="history-view" role="tabpanel" aria-labelledby="tab-history" hidden>
           <div class="history-heading">
             <div>
-              <h3>Past assessments</h3>
-              <p>Saved simulated batches from this workspace.</p>
+              <h3>Historical Batch Log</h3>
+              <p>Persistent database records of simulated assessments.</p>
             </div>
-            <button class="button button-quiet" id="refresh-history" type="button">↻ Refresh</button>
+            <button class="button button-quiet" id="refresh-history" type="button">↻ Synchronize History</button>
           </div>
-          <p class="history-status" id="history-status" role="status">Loading batch history…</p>
+          <p class="history-status" id="history-status" role="status">Retrieving batch telemetry…</p>
           <div class="table-scroll">
             <table class="grain-table history-table">
               <thead>
                 <tr>
-                  <th>Batch ID</th>
-                  <th>Sample</th>
+                  <th>Batch Identifier</th>
+                  <th>Sample Lot</th>
                   <th>Variety</th>
-                  <th>Created</th>
-                  <th>Grains</th>
-                  <th></th>
+                  <th>Acquired Timestamp</th>
+                  <th>Grain Count</th>
+                  <th>Action</th>
                 </tr>
               </thead>
               <tbody id="history-table-body"></tbody>
             </table>
           </div>
         </div>
+
         <div class="panel-actions report-actions">
-          <button class="button button-quiet" type="button" data-back>← Detection</button>
-          <div>
-            <button class="button button-quiet" id="download-report" type="button">↓ Download report</button>
-            <button class="button button-primary" id="new-scan" type="button">Start a new sample <span aria-hidden="true">↻</span></button>
+          <button class="button button-quiet" type="button" data-back>← Return to Segmentation</button>
+          <div class="export-actions">
+            <button class="button button-quiet" id="download-report" type="button">⎙ Export PDF / Print Certificate</button>
+            <button class="button button-primary" id="new-scan" type="button">Analyze New Sample Lot <span aria-hidden="true">↻</span></button>
           </div>
         </div>
       </section>
 
       <footer class="page-footer">
-        <span><span class="footer-leaf" aria-hidden="true">✳</span> Agri Scan</span>
-        <span>Designed for clearer grain quality conversations.</span>
-        <span>Demo environment · all hardware simulated</span>
+        <div class="footer-left">
+          <span class="footer-brand">AGRISCAN PRECISION INSTRUMENTS</span>
+          <span class="footer-sep">·</span>
+          <span>Optical Morpohology & Computer Vision Engine</span>
+        </div>
+        <div class="footer-right">
+          <span>SIMULATED HARDWARE ENVIRONMENT · OFFLINE STANDALONE DEPLOYMENT</span>
+        </div>
       </footer>
     </main>
   </body>

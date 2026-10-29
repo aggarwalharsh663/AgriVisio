@@ -25,10 +25,10 @@
 	let detectedByClass = {};
 
 	const categories = [
-		{ key: "good", label: "Good", color: "#348255", css: "good-dot" },
-		{ key: "broken", label: "Broken", color: "#d74e4e", css: "broken-dot" },
-		{ key: "chalky", label: "Chalky", color: "#e99735", css: "chalky-dot" },
-		{ key: "discolored", label: "Discolored", color: "#8951b4", css: "discolored-dot" },
+		{ key: "good", label: "Good", color: "#10b981", css: "good-dot" },
+		{ key: "broken", label: "Broken", color: "#f43f5e", css: "broken-dot" },
+		{ key: "chalky", label: "Chalky", color: "#f59e0b", css: "chalky-dot" },
+		{ key: "discolored", label: "Discolored", color: "#a855f7", css: "discolored-dot" },
 	];
 	const classColor = Object.fromEntries(categories.map(({ key, color }) => [key, color]));
 
@@ -69,7 +69,7 @@
 		photoInput.required = uploading;
 		document.querySelector("#chamber-figure").hidden = uploading;
 		document.querySelector("#grain-count-field").hidden = uploading;
-		document.querySelector("#scan-button .button-label").textContent = uploading ? "Analyze photo" : "Pour rice and scan";
+		document.querySelector("#scan-button .button-label").textContent = uploading ? "Analyze Photo" : "Initiate Scan Sequence";
 		document.querySelectorAll("[data-source]").forEach((card) => {
 			card.classList.toggle("is-selected", card.dataset.source === scanSource.value);
 		});
@@ -90,8 +90,8 @@
 		scanButton.disabled = loading;
 		scanButton.classList.toggle("is-loading", loading);
 		scanButton.querySelector(".button-label").textContent = loading
-			? scanSource.value === "upload" ? "Analyzing uploaded photo…" : "Analyzing simulated sample…"
-			: scanSource.value === "upload" ? "Analyze photo" : "Pour rice and scan";
+			? scanSource.value === "upload" ? "Processing Optical Analysis…" : "Executing Optical Scan…"
+			: scanSource.value === "upload" ? "Analyze Photo" : "Initiate Scan Sequence";
 		form.setAttribute("aria-busy", String(loading));
 	}
 
@@ -437,17 +437,79 @@
 	renderReportCharts.create = function createCharts() {
 		destroyCharts();
 		if (typeof window.Chart !== "function") return;
-		const chartText = "#536259";
+		const chartText = "#94a3b8";
+		const gridColor = "rgba(148, 163, 184, 0.12)";
 		const qualityChart = new window.Chart(document.querySelector("#quality-chart"), {
 			type: "doughnut",
-			data: { labels: categories.map(({ label }) => label), datasets: [{ data: categories.map(({ key }) => Number(batch.summary.counts[key] || 0)), backgroundColor: categories.map(({ color }) => color), borderColor: "#ffffff", borderWidth: 3, hoverOffset: 7 }] },
-			options: { responsive: true, maintainAspectRatio: false, cutout: "67%", plugins: { legend: { display: false }, tooltip: { callbacks: { label: (item) => `${item.label}: ${item.raw} grains` } } } },
+			data: {
+				labels: categories.map(({ label }) => label),
+				datasets: [{
+					data: categories.map(({ key }) => Number(batch.summary.counts[key] || 0)),
+					backgroundColor: ["#10b981", "#f43f5e", "#f59e0b", "#a855f7"],
+					borderColor: "#12181f",
+					borderWidth: 3,
+					hoverOffset: 6
+				}]
+			},
+			options: {
+				responsive: true,
+				maintainAspectRatio: false,
+				cutout: "70%",
+				plugins: {
+					legend: { display: false },
+					tooltip: {
+						backgroundColor: "#18222c",
+						titleColor: "#f8fafc",
+						bodyColor: "#e2e8f0",
+						borderColor: "rgba(255,255,255,0.12)",
+						borderWidth: 1,
+						callbacks: { label: (item) => `${item.label}: ${item.raw} grains` }
+					}
+				}
+			},
 		});
 		const histogram = makeHistogram(batch.grains.map((grain) => Number(grain.length_mm)).filter(Number.isFinite));
 		const lengthChart = new window.Chart(document.querySelector("#length-chart"), {
 			type: "bar",
-			data: { labels: histogram.labels, datasets: [{ label: "Grains", data: histogram.counts, backgroundColor: "rgba(74, 155, 102, .76)", borderColor: "#348255", borderWidth: 1, borderRadius: 5, maxBarThickness: 38 }] },
-			options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { title: { display: true, text: "Length (mm)", color: chartText }, grid: { display: false }, ticks: { color: chartText, maxRotation: 0, autoSkip: true } }, y: { beginAtZero: true, title: { display: true, text: "Grain count", color: chartText }, grid: { color: "#e9eee8" }, ticks: { precision: 0, color: chartText } } } },
+			data: {
+				labels: histogram.labels,
+				datasets: [{
+					label: "Grains",
+					data: histogram.counts,
+					backgroundColor: "rgba(16, 185, 129, 0.45)",
+					borderColor: "#10b981",
+					borderWidth: 1.5,
+					borderRadius: 4,
+					maxBarThickness: 32
+				}]
+			},
+			options: {
+				responsive: true,
+				maintainAspectRatio: false,
+				plugins: {
+					legend: { display: false },
+					tooltip: {
+						backgroundColor: "#18222c",
+						titleColor: "#f8fafc",
+						bodyColor: "#e2e8f0",
+						borderColor: "rgba(255,255,255,0.12)",
+						borderWidth: 1
+					}
+				},
+				scales: {
+					x: {
+						title: { display: true, text: "Length (mm)", color: chartText, font: { weight: "600", size: 11 } },
+						grid: { display: false },
+						ticks: { color: chartText, maxRotation: 0, autoSkip: true, font: { family: "'JetBrains Mono', monospace", size: 11 } }
+					},
+					y: {
+						beginAtZero: true,
+						title: { display: true, text: "Grain count", color: chartText, font: { weight: "600", size: 11 } },
+						grid: { color: gridColor },
+						ticks: { precision: 0, color: chartText, font: { family: "'JetBrains Mono', monospace", size: 11 } }
+					}
+				}
+			},
 		});
 		chartInstances = [qualityChart, lengthChart];
 	};
