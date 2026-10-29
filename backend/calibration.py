@@ -42,8 +42,9 @@ def calibrate(photo_path, card_patches, card_true_rgb, out_path):
     matrix, *_ = np.linalg.lstsq(_features(measured), true_rgb, rcond=None)
     patch_error_before = _patch_error(measured, true_rgb)
 
-    corrected_rgb = np.clip(_features(image_rgb) @ matrix, 0, 255).reshape(image_rgb.shape)
-    corrected_rgb = corrected_rgb.astype(np.uint8)
+    corrected_rgb = np.clip(
+        image_rgb.astype(np.float32) @ matrix[:3] + matrix[3], 0, 255
+    ).astype(np.uint8)
     corrected_measured = _patch_means(corrected_rgb, card_patches)
     patch_error_after = _patch_error(corrected_measured, true_rgb)
 

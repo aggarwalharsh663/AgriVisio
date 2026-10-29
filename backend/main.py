@@ -2,6 +2,7 @@ import hashlib
 import json
 import os
 import threading
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from statistics import mean, pstdev
@@ -17,8 +18,12 @@ from pydantic import BaseModel, Field
 
 from backend.calibration import calibrate
 from backend.database import get_batch as read_batch
-from backend.database import list_batches, save_batch
-from backend.grain_analysis import analyze_image, analyze_uploaded_image
+from backend.database import list_batch_ids, list_batches, save_batch
+from backend.grain_analysis import (
+    _load_model,
+    analyze_image,
+    analyze_uploaded_image,
+)
 from backend.simulator import make_scene
 from validation.validate import compare
 
@@ -57,9 +62,7 @@ def _next_batch_id() -> str:
             if path.is_dir()
         )
         existing.update(
-            batch["batch_id"]
-            for batch in list_batches(DATABASE_PATH)
-            if batch["batch_id"].startswith(f"AS-{date_part}-")
+            list_batch_ids(DATABASE_PATH, f"AS-{date_part}-")
         )
         sequence = max(
             (int(name.rsplit("-", 1)[-1]) for name in existing), default=0
@@ -407,7 +410,16 @@ def _make_uploaded_batch(
     return batch
 
 
-app = FastAPI(title="Agri Scan (SIMULATED HARDWARE DEMO)")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    try:
+        _load_model()
+    except Exception:
+        pass
+    yield
+
+
+app = FastAPI(title="Agri Scan (SIMULATED HARDWARE DEMO)", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

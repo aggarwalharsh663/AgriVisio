@@ -6,6 +6,7 @@ from pathlib import Path
 import cv2
 import joblib
 import numpy as np
+import scipy.ndimage
 
 
 CARD_IGNORE_X = 970
@@ -107,10 +108,13 @@ def _measure_grain_details(
     width_mm = min(side_a, side_b) * mm_per_pixel
     x, y, box_width, box_height = cv2.boundingRect(contour)
 
-    contour_mask = np.zeros(image.shape[:2], dtype=np.uint8)
-    cv2.drawContours(contour_mask, [contour], -1, 255, thickness=cv2.FILLED)
-    grain_pixels = contour_mask[y : y + box_height, x : x + box_width] > 0
-    grain_bgr = image[y : y + box_height, x : x + box_width][grain_pixels]
+    crop_bgr = image[y : y + box_height, x : x + box_width]
+    contour_mask = np.zeros((box_height, box_width), dtype=np.uint8)
+    cv2.drawContours(
+        contour_mask, [contour - [x, y]], -1, 255, thickness=cv2.FILLED
+    )
+    grain_pixels = contour_mask > 0
+    grain_bgr = crop_bgr[grain_pixels]
     if grain_bgr.size == 0:
         raise ValueError("contour does not contain any image pixels")
 
@@ -167,32 +171,50 @@ def _split_touching_grains(
     grouped_maxima = cv2.dilate(local_maxima, seed_kernel)
     group_count, group_labels = cv2.connectedComponents(grouped_maxima, 8)
 
+    maxima_y, maxima_x = np.nonzero(local_maxima)
+    if len(maxima_x) == 0:
+        return []
+
+    best_peaks = {}
+    for y, x in zip(maxima_y, maxima_x):
+        gid = group_labels[y, x]
+        if gid > 0:
+            d = distance[y, x]
+            if gid not in best_peaks or d > best_peaks[gid][0]:
+                best_peaks[gid] = (d, y, x)
+
     markers = np.ones((height, width), dtype=np.int32)
     markers[foreground > 0] = 0
     seed_labels = []
-    for group_id in range(1, group_count):
-        peak_y, peak_x = np.where(
-            (group_labels == group_id) & (local_maxima > 0)
-        )
-        if not len(peak_x):
-            continue
-        strongest_peak = int(np.argmax(distance[peak_y, peak_x]))
-        seed_labels.append(len(seed_labels) + 2)
-        markers[peak_y[strongest_peak], peak_x[strongest_peak]] = seed_labels[-1]
+    for gid in range(1, group_count):
+        if gid in best_peaks:
+            _, py, px = best_peaks[gid]
+            seed_label = len(seed_labels) + 2
+            seed_labels.append(seed_label)
+            markers[py, px] = seed_label
 
     if not seed_labels:
         return []
 
     watershed_labels = cv2.watershed(image_bgr.copy(), markers)
+    filtered_labels = np.where(foreground > 0, watershed_labels, 0)
+    slices = scipy.ndimage.find_objects(filtered_labels)
+
     contours = []
     for seed_label in seed_labels:
-        grain_mask = (
-            (watershed_labels == seed_label) & (foreground > 0)
-        ).astype(np.uint8) * 255
-        if cv2.countNonZero(grain_mask) < MIN_GRAIN_AREA:
+        idx = seed_label - 1
+        if idx >= len(slices) or slices[idx] is None:
+            continue
+        ys, xs = slices[idx]
+        y0 = max(0, ys.start - 1)
+        y1 = min(height, ys.stop + 1)
+        x0 = max(0, xs.start - 1)
+        x1 = min(width, xs.stop + 1)
+        sub_mask = (filtered_labels[y0:y1, x0:x1] == seed_label).astype(np.uint8) * 255
+        if cv2.countNonZero(sub_mask) < MIN_GRAIN_AREA:
             continue
         found, _ = cv2.findContours(
-            grain_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+            sub_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE, offset=(x0, y0)
         )
         if found:
             contours.append(max(found, key=cv2.contourArea))
@@ -284,15 +306,30 @@ def _load_model() -> dict:
         }
     if bundle.get("feature_names") != list(FEATURE_NAMES):
         raise ValueError(f"Classifier features do not match {MODEL_PATH}")
+    model = bundle["model"]
+    importance_order = np.argsort(model.feature_importances_)[::-1][:2]
+    bundle["top_features"] = [
+        FEATURE_LABELS[FEATURE_NAMES[index]] for index in importance_order
+    ]
     return bundle
 
 
-def _reason(label: str, measurement: dict, batch_median: float, model) -> str:
-    ratio = measurement["length_mm"] / batch_median * 100
-    importance_order = np.argsort(model.feature_importances_)[::-1][:2]
-    important_features = [
-        FEATURE_LABELS[FEATURE_NAMES[index]] for index in importance_order
-    ]
+def _reason(
+    label: str,
+    measurement: dict,
+    batch_median: float,
+    model=None,
+    important_features: list[str] | None = None,
+) -> str:
+    ratio = measurement["length_mm"] / batch_median * 100 if batch_median else 0.0
+    if important_features is None:
+        if model is not None and hasattr(model, "feature_importances_"):
+            importance_order = np.argsort(model.feature_importances_)[::-1][:2]
+            important_features = [
+                FEATURE_LABELS[FEATURE_NAMES[index]] for index in importance_order
+            ]
+        else:
+            important_features = ["grain length", "grain width"]
     return (
         f"{label.capitalize()}: length {measurement['length_mm']:.1f} mm is "
         f"{ratio:.0f}% of batch median {batch_median:.1f} mm; key model "
@@ -331,6 +368,7 @@ def _analyze_image(
     if details:
         bundle = _load_model()
         model = bundle["model"]
+        top_features = bundle.get("top_features")
         features = [
             feature_vector(measurement, saturation)
             for measurement, saturation in details
@@ -349,7 +387,9 @@ def _analyze_image(
                 "label": label,
                 "confidence": round(confidence, 4),
                 "low_confidence": confidence < LOW_CONFIDENCE_THRESHOLD,
-                "reason": _reason(label, measurement, batch_median, model),
+                "reason": _reason(
+                    label, measurement, batch_median, model, top_features
+                ),
             }
             grains.append(grain)
 

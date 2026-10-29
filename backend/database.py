@@ -13,6 +13,8 @@ def _connect(database_path: Path) -> Generator[sqlite3.Connection, None, None]:
     connection = sqlite3.connect(database_path, timeout=10)
     connection.row_factory = sqlite3.Row
     try:
+        connection.execute("PRAGMA journal_mode=WAL;")
+        connection.execute("PRAGMA synchronous=NORMAL;")
         connection.execute(
             """
             CREATE TABLE IF NOT EXISTS batches (
@@ -63,3 +65,17 @@ def list_batches(database_path: Path) -> list[dict]:
             "SELECT batch_json FROM batches ORDER BY created_at DESC, batch_id DESC"
         ).fetchall()
     return [json.loads(row["batch_json"]) for row in rows]
+
+
+def list_batch_ids(database_path: Path, prefix: str = "") -> list[str]:
+    """Return matching batch ids without deserializing entire records."""
+    if not database_path.is_file():
+        return []
+    with _connect(database_path) as connection:
+        if prefix:
+            rows = connection.execute(
+                "SELECT batch_id FROM batches WHERE batch_id LIKE ?", (f"{prefix}%",)
+            ).fetchall()
+        else:
+            rows = connection.execute("SELECT batch_id FROM batches").fetchall()
+    return [row["batch_id"] for row in rows]

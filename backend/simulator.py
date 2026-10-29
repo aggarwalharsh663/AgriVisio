@@ -39,14 +39,30 @@ BASE_COLOR = {
 }
 
 
+_yy, _xx = np.mgrid[0:H, 0:W]
+_VIGNETTE = (
+    1.0 - 0.25 * (((_xx - W / 2) / (W / 2)) ** 2 + ((_yy - H / 2) / (H / 2)) ** 2)
+)[..., None].astype(np.float32)
+
+
 def _draw_grain(img, cx, cy, length, width, angle, label, rng):
     color = np.array(BASE_COLOR[label], dtype=np.float32)
     color += rng.normal(0, 4, 3)
-    layer = np.zeros((H, W, 3), np.float32)
-    mask = np.zeros((H, W), np.uint8)
+    pad = int(np.ceil(max(length, width) / 2 + max(width / 4, 1) * 3 + 2))
+    x0 = max(0, int(cx) - pad)
+    x1 = min(W, int(cx) + pad + 1)
+    y0 = max(0, int(cy) - pad)
+    y1 = min(H, int(cy) + pad + 1)
+
+    sub_w = x1 - x0
+    sub_h = y1 - y0
+    local_cx = int(cx) - x0
+    local_cy = int(cy) - y0
+
+    mask = np.zeros((sub_h, sub_w), np.uint8)
     cv2.ellipse(
         mask,
-        (int(cx), int(cy)),
+        (local_cx, local_cy),
         (int(length / 2), int(width / 2)),
         angle,
         0,
@@ -56,12 +72,13 @@ def _draw_grain(img, cx, cy, length, width, angle, label, rng):
     )
     dist = cv2.GaussianBlur(mask, (0, 0), max(width / 4, 1)).astype(np.float32) / 255
     shade = 0.80 + 0.25 * dist
+    layer = np.empty((sub_h, sub_w, 3), np.float32)
     for channel in range(3):
         layer[..., channel] = color[channel] * shade
     if label == "chalky":
         cv2.ellipse(
             layer,
-            (int(cx), int(cy)),
+            (local_cx, local_cy),
             (int(length / 3), int(width / 3.2)),
             angle,
             0,
@@ -69,7 +86,9 @@ def _draw_grain(img, cx, cy, length, width, angle, label, rng):
             (255, 255, 252),
             -1,
         )
-    img[mask > 0] = layer[mask > 0]
+    hit = mask > 0
+    img_sub = img[y0:y1, x0:x1]
+    img_sub[hit] = layer[hit]
 
 
 def _build_scene(n_grains, rng):
@@ -126,13 +145,13 @@ def _draw_card(img):
 def _apply_lighting(ideal, params, rng):
     img = ideal / 255.0
     img = img * np.array(params["gain"], np.float32)[None, None, :]
-    img = np.clip(img, 0, 1) ** params["gamma"]
-    yy, xx = np.mgrid[0:H, 0:W]
-    vignette = 1 - 0.25 * (
-        ((xx - W / 2) / (W / 2)) ** 2 + ((yy - H / 2) / (H / 2)) ** 2
-    )
-    img = img * vignette[..., None]
-    img = img * 255 + params["bright"] + rng.normal(0, params["noise"], img.shape)
+    gamma = params["gamma"]
+    if gamma != 1.0:
+        img = np.clip(img, 0, 1) ** gamma
+    else:
+        img = np.clip(img, 0, 1)
+    img = img * _VIGNETTE
+    img = img * 255 + (params["bright"] + rng.normal(0, params["noise"], img.shape))
     return np.clip(img, 0, 255).astype(np.uint8)
 
 
