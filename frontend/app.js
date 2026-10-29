@@ -127,13 +127,13 @@
 		if (isUploadedPhoto()) {
 			document.querySelector("#error-before").textContent = "N/A";
 			document.querySelector("#error-after").textContent = "N/A";
-			document.querySelector("#improvement-text").textContent = "No card · estimated scale";
+			document.querySelector("#improvement-text").textContent = "No card - estimated scale";
 			return;
 		}
 		const before = Number(batch.calibration.patch_error_before);
 		const after = Number(batch.calibration.patch_error_after);
-		document.querySelector("#error-before").textContent = Number.isFinite(before) ? before.toFixed(1) : "—";
-		document.querySelector("#error-after").textContent = Number.isFinite(after) ? after.toFixed(1) : "—";
+		document.querySelector("#error-before").textContent = Number.isFinite(before) ? before.toFixed(1) : "-";
+		document.querySelector("#error-after").textContent = Number.isFinite(after) ? after.toFixed(1) : "-";
 		const reduction = before > 0 ? Math.max(0, Math.round((1 - after / before) * 100)) : 0;
 		document.querySelector("#improvement-text").textContent = `${reduction}% lower color error`;
 		document.querySelector("#comparison-range").value = "50";
@@ -437,17 +437,22 @@
 	renderReportCharts.create = function createCharts() {
 		destroyCharts();
 		if (typeof window.Chart !== "function") return;
-		const chartText = "#737373";
-		const gridColor = "rgba(255, 255, 255, 0.06)";
+		const isDark = document.documentElement.classList.contains("dark");
+		const chartText = isDark ? "#94a3b8" : "#64748b";
+		const gridColor = isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(15, 23, 42, 0.06)";
+		const barColor = isDark ? "rgba(56, 189, 248, 0.75)" : "rgba(37, 99, 235, 0.75)";
+		const barBorder = isDark ? "#38bdf8" : "#2563eb";
+		const doughnutBorder = isDark ? "#0f172a" : "#ffffff";
+		const tooltipBg = isDark ? "#1e293b" : "#0f172a";
 		const qualityChart = new window.Chart(document.querySelector("#quality-chart"), {
 			type: "doughnut",
 			data: {
 				labels: categories.map(({ label }) => label),
 				datasets: [{
 					data: categories.map(({ key }) => Number(batch.summary.counts[key] || 0)),
-					backgroundColor: ["#10b981", "#f43f5e", "#f59e0b", "#a855f7"],
-					borderColor: "#0d0d0d",
-					borderWidth: 3,
+					backgroundColor: ["#10b981", "#f43f5e", "#f59e0b", "#8b5cf6"],
+					borderColor: doughnutBorder,
+					borderWidth: 2,
 					hoverOffset: 6
 				}]
 			},
@@ -458,10 +463,10 @@
 				plugins: {
 					legend: { display: false },
 					tooltip: {
-						backgroundColor: "#171717",
+						backgroundColor: tooltipBg,
 						titleColor: "#ffffff",
-						bodyColor: "#d4d4d4",
-						borderColor: "rgba(255, 255, 255, 0.15)",
+						bodyColor: "#e2e8f0",
+						borderColor: "rgba(255, 255, 255, 0.12)",
 						borderWidth: 1,
 						padding: 10,
 						cornerRadius: 6,
@@ -478,8 +483,8 @@
 				datasets: [{
 					label: "Grains",
 					data: histogram.counts,
-					backgroundColor: "rgba(245, 158, 11, 0.75)",
-					borderColor: "#f59e0b",
+					backgroundColor: barColor,
+					borderColor: barBorder,
 					borderWidth: 1,
 					borderRadius: 4,
 					maxBarThickness: 34
@@ -491,10 +496,10 @@
 				plugins: {
 					legend: { display: false },
 					tooltip: {
-						backgroundColor: "#171717",
+						backgroundColor: tooltipBg,
 						titleColor: "#ffffff",
-						bodyColor: "#d4d4d4",
-						borderColor: "rgba(255, 255, 255, 0.15)",
+						bodyColor: "#e2e8f0",
+						borderColor: "rgba(255, 255, 255, 0.12)",
 						borderWidth: 1,
 						padding: 10,
 						cornerRadius: 6,
@@ -702,4 +707,35 @@
 		switchReportTab("report");
 		setStep(1);
 	});
+
+	function initTheme() {
+		const saved = localStorage.getItem("agriscan_theme") || "light";
+		applyTheme(saved);
+		const toggleBtn = document.querySelector("#theme-toggle");
+		if (toggleBtn) {
+			toggleBtn.addEventListener("click", () => {
+				const current = document.documentElement.classList.contains("dark") ? "dark" : "light";
+				const next = current === "dark" ? "light" : "dark";
+				localStorage.setItem("agriscan_theme", next);
+				applyTheme(next);
+				if (typeof renderReportCharts.create === "function") {
+					renderReportCharts.create();
+				}
+			});
+		}
+	}
+
+	function applyTheme(mode) {
+		const isDark = mode === "dark";
+		document.documentElement.classList.toggle("dark", isDark);
+		const toggleBtn = document.querySelector("#theme-toggle");
+		if (toggleBtn) {
+			const icon = toggleBtn.querySelector(".toggle-icon");
+			const label = toggleBtn.querySelector(".toggle-label");
+			if (icon) icon.textContent = isDark ? "🌙" : "☀️";
+			if (label) label.textContent = isDark ? "Dark" : "Light";
+		}
+	}
+
+	initTheme();
 })();

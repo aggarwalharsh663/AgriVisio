@@ -3,13 +3,13 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#050505">
-    <title>AgriScan - Optical Grain Quality Assessment</title>
-    <link rel="stylesheet" href="/style.css?v=20261029_obsidian_amber">
-    <script src="/chamber.js?v=20261029_obsidian_amber" defer></script>
+    <meta name="theme-color" content="#f8fafc">
+    <title>AgriScan - Precision Optical Grain Quality Assessment</title>
+    <link rel="stylesheet" href="/style.css?v=20261029_sapphire_v1">
+    <script src="/chamber.js?v=20261029_sapphire_v1" defer></script>
     <script src="/vendor/chart.umd.js" defer></script>
     <script src="/vendor/qrcode.min.js" defer></script>
-    <script src="/app.js?v=20261029_obsidian_amber" defer></script>
+    <script src="/app.js?v=20261029_sapphire_v1" defer></script>
   </head>
   <body>
     <div class="atmosphere" aria-hidden="true"></div>
@@ -19,10 +19,10 @@
         <a class="brand" href="/" aria-label="AgriScan home">
           <span class="brand-mark" aria-hidden="true">
             <svg viewBox="0 0 32 32" fill="none">
-              <circle cx="16" cy="16" r="13" stroke="currentColor" stroke-width="1.5" stroke-dasharray="3 3"/>
-              <circle cx="16" cy="16" r="8" stroke="#f59e0b" stroke-width="1.8"/>
-              <path d="M16 3v4M16 25v4M3 16h4M25 16h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-              <ellipse cx="16" cy="16" rx="3.5" ry="6.5" transform="rotate(35, 16, 16)" fill="#f59e0b" opacity="0.9"/>
+              <circle cx="16" cy="16" r="13" stroke="currentColor" stroke-width="1.8" stroke-dasharray="3 3"/>
+              <circle cx="16" cy="16" r="8" stroke="var(--primary)" stroke-width="2"/>
+              <path d="M16 3v4M16 25v4M3 16h4M25 16h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+              <ellipse cx="16" cy="16" rx="3.5" ry="6.5" transform="rotate(35, 16, 16)" fill="var(--primary)" opacity="0.9"/>
             </svg>
           </span>
           <span class="brand-text">AGRI<span class="brand-accent">SCAN</span></span>
@@ -32,14 +32,17 @@
       <div class="topbar-telemetry">
         <span class="top-note">ISO / USDA Standard</span>
         <span class="top-note-divider">|</span>
-        <span class="top-note">4K Morphometrics</span>
+        <button class="theme-toggle-btn" id="theme-toggle" type="button" aria-label="Toggle light and dark mode">
+          <span class="toggle-icon">☀️</span>
+          <span class="toggle-label">Light</span>
+        </button>
       </div>
     </header>
 
     <main class="page-shell">
       <section class="intro" aria-labelledby="page-title">
         <div class="intro-content">
-          <p class="eyebrow">PRECISION GRAIN QUALITY PLATFORM</p>
+          <p class="eyebrow">PRECISION OPTICAL INSPECTION PLATFORM</p>
           <h1 id="page-title">From sample to <em>clear answers.</em></h1>
           <p class="intro-copy">High-resolution optical assessment of rice lots, simulated color calibration, and grain-by-grain morphometrics.</p>
           <ul class="intro-points">
@@ -56,6 +59,7 @@
         </div>
       </section>
 
+      <!-- Stepper (Responsive 4-column cards, never overlaps) -->
       <nav class="stepper" aria-label="Assessment progress">
         <div class="stepper-grid">
           <button class="step-item is-active" type="button" data-step="1" aria-current="step">
@@ -180,7 +184,7 @@
             </label>
           </div>
           <div class="scan-footer">
-            <p><span class="status-dot-amber" aria-hidden="true"></span> Saved to this local demo workspace.</p>
+            <p><span class="status-dot" aria-hidden="true"></span> Saved to this local demo workspace.</p>
             <button class="button button-primary" id="scan-button" type="submit">
               <span class="button-label">Pour rice and scan</span>
               <span class="spinner" aria-hidden="true"></span>
