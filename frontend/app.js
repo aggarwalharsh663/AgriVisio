@@ -67,9 +67,13 @@
 		uploadField.hidden = !uploading;
 		photoInput.disabled = !uploading;
 		photoInput.required = uploading;
-		document.querySelector("#chamber-figure").hidden = uploading;
-		document.querySelector("#grain-count-field").hidden = uploading;
-		document.querySelector("#scan-button .button-label").textContent = uploading ? "Analyze Photo" : "Initiate Scan Sequence";
+		const chamberFigure = document.querySelector("#chamber-figure");
+		if (chamberFigure) chamberFigure.hidden = uploading;
+		const grainCountField = document.querySelector("#grain-count-field");
+		if (grainCountField) grainCountField.hidden = uploading;
+		const lightingField = document.querySelector(".lighting-field");
+		if (lightingField) lightingField.hidden = uploading;
+		document.querySelector("#scan-button .button-label").textContent = uploading ? "Upload & analyze photo" : "Pour rice and scan";
 		document.querySelectorAll("[data-source]").forEach((card) => {
 			card.classList.toggle("is-selected", card.dataset.source === scanSource.value);
 		});
@@ -90,8 +94,8 @@
 		scanButton.disabled = loading;
 		scanButton.classList.toggle("is-loading", loading);
 		scanButton.querySelector(".button-label").textContent = loading
-			? scanSource.value === "upload" ? "Processing Optical Analysis…" : "Executing Optical Scan…"
-			: scanSource.value === "upload" ? "Analyze Photo" : "Initiate Scan Sequence";
+			? scanSource.value === "upload" ? "Analyzing photo..." : "Scanning sample..."
+			: scanSource.value === "upload" ? "Upload & analyze photo" : "Pour rice and scan";
 		form.setAttribute("aria-busy", String(loading));
 	}
 

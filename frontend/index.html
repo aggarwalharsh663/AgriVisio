@@ -5,11 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#f8fafc">
     <title>AgriScan - Precision Optical Grain Quality Assessment</title>
-    <link rel="stylesheet" href="/style.css?v=20261029_sapphire_v1">
-    <script src="/chamber.js?v=20261029_sapphire_v1" defer></script>
+    <link rel="stylesheet" href="/style.css?v=extraordinary_v2">
+    <script src="/chamber.js?v=extraordinary_v2" defer></script>
     <script src="/vendor/chart.umd.js" defer></script>
     <script src="/vendor/qrcode.min.js" defer></script>
-    <script src="/app.js?v=20261029_sapphire_v1" defer></script>
+    <script src="/app.js?v=extraordinary_v2" defer></script>
   </head>
   <body>
     <div class="atmosphere" aria-hidden="true"></div>
@@ -66,7 +66,7 @@
             <span class="step-number">01</span>
             <div class="step-info">
               <span class="step-label">Chamber</span>
-              <span class="step-sub">Virtual inspection</span>
+              <span class="step-sub">Sample setup</span>
             </div>
           </button>
           <button class="step-item" type="button" data-step="2" aria-disabled="true">
@@ -105,14 +105,21 @@
             <p class="panel-subtitle">Configure sample parameters before optical scanning.</p>
           </div>
         </div>
+
+        <!-- SIMULATED CHAMBER FIGURE (Hidden during photo upload) -->
         <figure class="chamber-visual" id="chamber-figure">
           <div class="viewfinder">
             <span class="vf vf-tl"></span><span class="vf vf-tr"></span>
             <span class="vf vf-bl"></span><span class="vf vf-br"></span>
+            <div class="viewfinder-hud">
+              <span class="hud-tag"><span class="hud-live-dot"></span> LIVE OPTICAL ENGINE</span>
+              <span class="hud-tag">4096 x 3072 · 12-BIT RAW</span>
+            </div>
             <canvas id="chamber-canvas" aria-label="Animated simulated rice chamber"></canvas>
           </div>
           <figcaption>Camera, chamber, rice, and lighting are simulated.</figcaption>
         </figure>
+
         <form id="scan-form">
           <div class="form-grid source-grid">
             <div class="field">
@@ -124,22 +131,40 @@
               <div class="choice-cards" role="group" aria-label="Photo source">
                 <button class="choice-card is-selected" type="button" data-source="simulated">
                   <strong>Simulated sample</strong>
-                  <small>Use the virtual chamber</small>
+                  <small>Use the virtual optical chamber</small>
                 </button>
                 <button class="choice-card" type="button" data-source="upload">
                   <strong>Upload a photo</strong>
                   <small>Analyze your own rice image</small>
                 </button>
               </div>
-              <small>Use the simulated chamber or analyze your own rice photo.</small>
+              <small>Choose between simulated laboratory scan or photo file analysis.</small>
             </div>
+
+            <!-- UPLOAD PHOTO DROPZONE (Only visible in upload mode) -->
             <div class="field upload-field" id="upload-field" hidden>
-              <label for="photo-upload">Choose a rice photo</label>
-              <input id="photo-upload" name="image" type="file" accept="image/jpeg,image/png,image/webp" disabled>
-              <small>JPEG, PNG or WebP; up to 10 MB and 20 megapixels. Estimated scale: 0.12 mm/pixel.</small>
-              <img id="photo-preview" alt="Preview of the selected rice photo" hidden>
+              <label class="dropzone-box" for="photo-upload">
+                <span class="dropzone-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
+                  </svg>
+                </span>
+                <span class="dropzone-title">Choose or drag &amp; drop a rice photo</span>
+                <span class="dropzone-subtitle">JPEG, PNG, or WebP up to 10 MB and 20 megapixels</span>
+                <span class="dropzone-tags">
+                  <span class="file-chip">JPEG</span>
+                  <span class="file-chip">PNG</span>
+                  <span class="file-chip">WebP</span>
+                  <span class="file-chip">Scale: 0.12 mm/px</span>
+                </span>
+                <input id="photo-upload" name="image" type="file" accept="image/jpeg,image/png,image/webp" disabled class="sr-only">
+              </label>
+              <div class="photo-preview-wrap" id="preview-wrapper">
+                <img id="photo-preview" alt="Preview of the selected rice photo" hidden>
+              </div>
             </div>
           </div>
+
           <div class="form-grid">
             <label class="field">
               <span>Sample name</span>
@@ -151,6 +176,8 @@
               <input id="variety" name="variety" type="text" maxlength="80" value="Basmati" required autocomplete="off">
               <small>E.g. Basmati, Jasmine, Sona Masoori</small>
             </label>
+
+            <!-- LIGHTING PROFILE (Only for simulated chamber) -->
             <div class="field lighting-field">
               <span>Lighting profile</span>
               <select id="lighting" name="lighting" class="sr-only" tabindex="-1" aria-hidden="true">
@@ -177,12 +204,15 @@
               </div>
               <small>Choose the simulated chamber lighting</small>
             </div>
+
+            <!-- GRAIN COUNT SLIDER (Hidden during photo upload) -->
             <label class="field slider-field" id="grain-count-field" for="grain-count">
               <span>Grain count <strong id="grain-count-value">24 grains</strong></span>
               <input id="grain-count" name="n_grains" type="range" min="8" max="200" step="4" value="24">
               <span class="range-ends"><small>8 grains</small><small>200 grains</small></span>
             </label>
           </div>
+
           <div class="scan-footer">
             <p><span class="status-dot" aria-hidden="true"></span> Saved to this local demo workspace.</p>
             <button class="button button-primary" id="scan-button" type="submit">
