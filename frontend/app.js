@@ -119,23 +119,34 @@
 	function renderCalibration() {
 		document.querySelector("#raw-image").src = batch.images.raw;
 		document.querySelector("#calibrated-image").src = batch.images.calibrated;
-		document.querySelector(".image-tag-left").textContent = isUploadedPhoto()
-			? "UPLOADED · UNCALIBRATED"
-			: "CALIBRATED";
-		document.querySelector(".image-tag-right").textContent = isUploadedPhoto()
-			? "SAME PHOTO"
-			: "RAW · SIMULATED";
-		document.querySelector("#calibrated-image").alt = isUploadedPhoto()
-			? "Uncalibrated uploaded rice photo"
-			: "Color-calibrated simulated rice sample photo";
-		if (isUploadedPhoto()) {
+		const isUpload = isUploadedPhoto();
+		const divider = document.querySelector("#comparison-divider");
+		const range = document.querySelector("#comparison-range");
+		const caption = document.querySelector(".compare-caption");
+		const tagRight = document.querySelector(".image-tag-right");
+		const tagLeft = document.querySelector(".image-tag-left");
+
+		if (isUpload) {
+			if (divider) divider.hidden = true;
+			if (range) range.hidden = true;
+			if (caption) caption.hidden = true;
+			if (tagRight) tagRight.hidden = true;
+			if (tagLeft) tagLeft.textContent = "Uploaded Photo - Standard View";
 			document.querySelector("#error-before").textContent = "N/A";
 			document.querySelector("#error-after").textContent = "N/A";
-			document.querySelector("#improvement-text").textContent = "No card - estimated scale";
+			document.querySelector("#improvement-text").textContent = "Direct camera capture - 0.12 mm/px scale";
 			return;
 		}
-		const before = Number(batch.calibration.patch_error_before);
-		const after = Number(batch.calibration.patch_error_after);
+
+		if (divider) divider.hidden = false;
+		if (range) range.hidden = false;
+		if (caption) caption.hidden = false;
+		if (tagRight) tagRight.hidden = false;
+		if (tagLeft) tagLeft.textContent = "Calibrated";
+		if (tagRight) tagRight.textContent = "Raw - simulated";
+
+		const before = Number(batch.calibration?.patch_error_before);
+		const after = Number(batch.calibration?.patch_error_after);
 		document.querySelector("#error-before").textContent = Number.isFinite(before) ? before.toFixed(1) : "-";
 		document.querySelector("#error-after").textContent = Number.isFinite(after) ? after.toFixed(1) : "-";
 		const reduction = before > 0 ? Math.max(0, Math.round((1 - after / before) * 100)) : 0;
@@ -300,9 +311,12 @@
 		document.querySelector("#mean-width").textContent = Number(summary.mean_width_mm).toFixed(2);
 		document.querySelector("#summary-good").textContent = `${summary.percent.good ?? 0}%`;
 		document.querySelector("#mean-confidence").textContent = `${Math.round(Number(summary.mean_confidence || 0) * 100)}%`;
-		document.querySelector("#confidence-warning").hidden = !(Number(summary.low_confidence_count) > 0);
-		const flaggedIds = batch.grains.filter((grain) => grain.low_confidence).map((grain) => grain.id);
-		document.querySelector("#warning-count").textContent = `${summary.low_confidence_count} grain${summary.low_confidence_count === 1 ? " needs" : "s need"} manual review${flaggedIds.length ? ` · #${flaggedIds.join(", #")}` : ""}.`;
+		const lowConf = Number(summary.low_confidence_count || 0);
+		document.querySelector("#confidence-warning").hidden = !(lowConf > 0);
+		if (lowConf > 0) {
+			const label = lowConf === 1 ? "1 grain flagged for review" : `${lowConf} grains flagged for review`;
+			document.querySelector("#warning-count").textContent = `${label} (below confidence threshold). You can inspect and sort them in the grain details table below.`;
+		}
 		document.querySelector("#report-legend").innerHTML = categories.map(({ key, label, css }) => `<div class="quality-row"><i class="legend-dot ${css}"></i><span>${label} · ${summary.percent[key] ?? 0}%</span><strong>${summary.counts[key] ?? 0}</strong></div>`).join("");
 		document.querySelector("#mean-length-note").textContent = uploadedPhoto ? "estimated mm · assumed scale" : "millimetres";
 		document.querySelector("#mean-width-note").textContent = uploadedPhoto ? "estimated mm · assumed scale" : "millimetres";

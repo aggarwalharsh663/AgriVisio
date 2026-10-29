@@ -69,30 +69,30 @@
    Deepest Void, High-Contrast OLED Elements, Razor Hairline Accents
    ========================================================================== */
 html.dark {
-	--bg-page: #06070a;
-	--bg-panel: #0d111a;
-	--bg-card: #121724;
-	--bg-elevated: #1a2234;
-	--bg-subtle: #090c12;
-	--bg-glass: rgba(13, 17, 26, 0.85);
+	--bg-page: #0a0d14;
+	--bg-panel: #101522;
+	--bg-card: #151c2e;
+	--bg-elevated: #1c253d;
+	--bg-subtle: #0d121c;
+	--bg-glass: rgba(16, 21, 34, 0.9);
 
 	--border-subtle: rgba(255, 255, 255, 0.08);
-	--border-medium: rgba(255, 255, 255, 0.16);
-	--border-strong: rgba(255, 255, 255, 0.28);
+	--border-medium: rgba(255, 255, 255, 0.14);
+	--border-strong: rgba(255, 255, 255, 0.24);
 	--border-focus: #38bdf8;
 
 	--primary: #38bdf8;
 	--primary-hover: #7dd3fc;
-	--primary-light: rgba(56, 189, 248, 0.14);
+	--primary-light: rgba(56, 189, 248, 0.12);
 	--primary-text: #020617;
-	--primary-glow: rgba(56, 189, 248, 0.35);
+	--primary-glow: rgba(56, 189, 248, 0.3);
 
 	--emerald: #34d399;
-	--emerald-light: rgba(52, 211, 153, 0.15);
+	--emerald-light: rgba(52, 211, 153, 0.14);
 	--rose: #fb7185;
-	--rose-light: rgba(251, 113, 133, 0.15);
+	--rose-light: rgba(251, 113, 133, 0.14);
 	--amber: #fbbf24;
-	--amber-light: rgba(251, 191, 36, 0.15);
+	--amber-light: rgba(251, 191, 36, 0.14);
 	--purple: #c084fc;
 
 	--text-title: #f8fafc;
@@ -100,9 +100,9 @@ html.dark {
 	--text-muted: #94a3b8;
 	--text-dim: #64748b;
 
-	--shadow-sm: 0 2px 4px 0 rgba(0, 0, 0, 0.6);
-	--shadow-md: 0 8px 24px -2px rgba(0, 0, 0, 0.65);
-	--shadow-lg: 0 20px 48px -4px rgba(0, 0, 0, 0.75);
+	--shadow-sm: 0 2px 4px 0 rgba(0, 0, 0, 0.5);
+	--shadow-md: 0 8px 24px -2px rgba(0, 0, 0, 0.55);
+	--shadow-lg: 0 20px 48px -4px rgba(0, 0, 0, 0.65);
 }
 
 *, *::before, *::after {
@@ -674,17 +674,21 @@ html.dark .atmosphere {
 }
 
 .photo-preview-wrap {
-	margin-top: 16px;
+	margin-top: 14px;
 	display: flex;
+	flex-direction: column;
+	align-items: center;
 	justify-content: center;
 }
 
 #photo-preview {
-	max-height: 320px;
-	border-radius: var(--radius-md);
+	max-width: 240px;
+	max-height: 160px;
+	border-radius: var(--radius-sm);
 	border: 1px solid var(--border-medium);
-	box-shadow: var(--shadow-md);
+	box-shadow: var(--shadow-sm);
 	object-fit: contain;
+	background: var(--bg-card);
 }
 
 /* FORMS & INPUTS */
@@ -925,49 +929,56 @@ html.dark .button-primary:hover:not(:disabled) {
 
 /* CALIBRATION COMPARISON SLIDER */
 .comparison-wrap {
-	margin-bottom: 24px;
+	margin: 0 auto 24px;
+	max-width: 640px;
 }
 
 .comparison {
 	position: relative;
 	width: 100%;
-	aspect-ratio: 16 / 10;
-	max-height: 480px;
+	min-height: 280px;
+	max-height: 440px;
 	border-radius: var(--radius-md);
 	overflow: hidden;
 	background: #000000;
 	border: 1px solid var(--border-medium);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	box-shadow: var(--shadow-md);
 }
 
 .comparison-image {
 	width: 100%;
-	height: 100%;
+	max-height: 440px;
 	object-fit: contain;
 	display: block;
 }
 
 .comparison-overlay {
 	position: absolute;
-	top: 0;
-	bottom: 0;
-	left: 0;
-	width: 50%;
-	overflow: hidden;
+	inset: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	clip-path: inset(0 calc(100% - var(--compare-position, 50%)) 0 0);
+	pointer-events: none;
 }
 
 .comparison-overlay .comparison-image {
 	width: 100%;
-	max-width: none;
+	max-height: 440px;
+	object-fit: contain;
 }
 
 .comparison-divider {
 	position: absolute;
 	top: 0;
 	bottom: 0;
-	left: 50%;
+	left: var(--compare-position, 50%);
 	width: 2px;
 	background: var(--primary);
-	box-shadow: 0 0 12px var(--primary);
+	box-shadow: 0 0 10px var(--primary);
 	pointer-events: none;
 	display: flex;
 	align-items: center;
@@ -1459,21 +1470,26 @@ html.dark .report-hero {
 	background: var(--amber-light);
 	border: 1px solid var(--amber);
 	border-radius: var(--radius-md);
-	padding: 16px 20px;
+	padding: 14px 18px;
 	margin-bottom: 24px;
 }
 
+html.dark .warning-card {
+	background: rgba(245, 158, 11, 0.08);
+	border: 1px solid rgba(245, 158, 11, 0.35);
+}
+
 .warning-symbol {
-	width: 24px;
-	height: 24px;
+	width: 22px;
+	height: 22px;
 	border-radius: 50%;
 	background: var(--amber);
-	color: #ffffff;
+	color: #000000;
 	font-weight: 900;
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	font-size: 14px;
+	font-size: 13px;
 	flex-shrink: 0;
 }
 
