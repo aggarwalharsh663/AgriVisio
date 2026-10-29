@@ -1,10 +1,10 @@
 """
 AgriScan - Standalone Windows Desktop Application Launcher
 Features:
-- Instant launch splash screen with animated progress and brand logo
+- Instant launch splash screen with animated progress and official brand logo
+- Client-side auto-poll + Python watchdog fallback for immediate transition (1-2s total)
 - Custom Windows taskbar and titlebar icon (SetCurrentProcessExplicitAppUserModelID + WM_SETICON)
-- Dedicated background FastAPI daemon with automatic port fallback
-- Smooth transition from splash to inspection console upon backend health check
+- Clean, non-blocking startup
 """
 
 import os
@@ -16,7 +16,7 @@ import ctypes
 import threading
 import urllib.request
 
-# Ensure Windows treats this process as its own app (prevents python.exe taskbar grouping & icon)
+# Ensure Windows assigns this process its own dedicated taskbar identity
 if sys.platform == "win32":
     try:
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("agriscan.precision.optics.1.0")
@@ -28,7 +28,10 @@ import webview
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 os.chdir(PROJECT_ROOT)
 
-ICON_PATH = os.path.join(PROJECT_ROOT, "agriscan.ico")
+ICON_PATH = os.path.join(PROJECT_ROOT, "app_icon.ico")
+if not os.path.exists(ICON_PATH):
+    ICON_PATH = os.path.join(PROJECT_ROOT, "agriscan.ico")
+
 LOGO_PATH = os.path.join(PROJECT_ROOT, "frontend", "assets", "logo.png")
 
 def get_logo_data_uri() -> str:
@@ -41,13 +44,13 @@ def get_logo_data_uri() -> str:
             pass
     return ""
 
-def generate_splash_html() -> str:
+def generate_splash_html(port: int) -> str:
     logo_uri = get_logo_data_uri()
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>AgriScan Loading</title>
+<title>AgriScan</title>
 <style>
   * {{ box-sizing: border-box; margin: 0; padding: 0; }}
   body {{
@@ -67,7 +70,7 @@ def generate_splash_html() -> str:
     position: absolute;
     inset: 0;
     pointer-events: none;
-    background: radial-gradient(circle at 50% 45%, rgba(245, 158, 11, 0.16) 0%, transparent 65%);
+    background: radial-gradient(circle at 50% 45%, rgba(245, 158, 11, 0.18) 0%, transparent 65%);
   }}
   .splash-container {{
     position: relative;
@@ -76,42 +79,47 @@ def generate_splash_html() -> str:
     flex-direction: column;
     align-items: center;
     text-align: center;
-    padding: 40px;
-    max-width: 520px;
+    padding: 36px 48px;
+    background: rgba(21, 24, 34, 0.7);
+    border: 2px solid #2d354d;
+    border-radius: 16px;
+    box-shadow: 0 16px 40px rgba(0,0,0,0.6);
+    backdrop-filter: blur(8px);
+    max-width: 480px;
     width: 90%;
   }}
   .logo-box {{
-    margin-bottom: 30px;
-    animation: popIn 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+    margin-bottom: 24px;
+    animation: popIn 0.4s cubic-bezier(0.16, 1, 0.3, 1);
   }}
   .logo-img {{
-    max-width: 340px;
+    max-width: 290px;
     height: auto;
     display: block;
-    filter: drop-shadow(0 12px 28px rgba(0,0,0,0.7));
+    filter: drop-shadow(0 8px 20px rgba(0,0,0,0.5));
   }}
   .progress-shell {{
-    width: 320px;
-    height: 8px;
+    width: 280px;
+    height: 7px;
     background: #171b26;
-    border: 2px solid #2d354d;
+    border: 1.5px solid #2d354d;
     border-radius: 999px;
     overflow: hidden;
-    margin-bottom: 18px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    margin-bottom: 16px;
   }}
   .progress-bar {{
     height: 100%;
-    width: 25%;
+    width: 30%;
     background: #f59e0b;
     border-radius: 999px;
-    animation: pulseTravel 1.8s infinite ease-in-out;
+    transition: width 0.25s ease;
+    animation: pulseTravel 1.6s infinite ease-in-out;
   }}
   .status-line {{
-    font-family: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", monospace;
     font-size: 11px;
     font-weight: 800;
-    letter-spacing: 0.14em;
+    letter-spacing: 0.12em;
     text-transform: uppercase;
     color: #94a3b8;
     display: flex;
@@ -119,19 +127,19 @@ def generate_splash_html() -> str:
     gap: 8px;
   }}
   .status-dot {{
-    width: 7px;
-    height: 7px;
+    width: 6px;
+    height: 6px;
     background: #f59e0b;
     border-radius: 50%;
-    animation: blink 1s infinite alternate;
+    animation: blink 0.8s infinite alternate;
   }}
   @keyframes popIn {{
-    0% {{ opacity: 0; transform: scale(0.92) translateY(8px); }}
+    0% {{ opacity: 0; transform: scale(0.94) translateY(6px); }}
     100% {{ opacity: 1; transform: scale(1) translateY(0); }}
   }}
   @keyframes pulseTravel {{
-    0% {{ width: 15%; margin-left: 0; }}
-    50% {{ width: 55%; margin-left: 35%; }}
+    0% {{ width: 20%; margin-left: 0; }}
+    50% {{ width: 50%; margin-left: 35%; }}
     100% {{ width: 25%; margin-left: 75%; }}
   }}
   @keyframes blink {{
@@ -147,13 +155,45 @@ def generate_splash_html() -> str:
       <img src="{logo_uri}" class="logo-img" alt="AgriScan Logo">
     </div>
     <div class="progress-shell">
-      <div class="progress-bar"></div>
+      <div class="progress-bar" id="progress-bar"></div>
     </div>
     <div class="status-line">
       <span class="status-dot"></span>
-      <span>INITIALIZING OPTICAL & ML ENGINE...</span>
+      <span id="status-text">INITIALIZING OPTICAL &amp; ML CORE...</span>
     </div>
   </div>
+
+  <script>
+    const targetUrl = "http://127.0.0.1:{port}";
+    let attempts = 0;
+    async function checkServerReady() {{
+      attempts++;
+      try {{
+        const res = await fetch(targetUrl + "/api/health", {{ cache: "no-store" }});
+        if (res.ok) {{
+          const pBar = document.getElementById("progress-bar");
+          const sText = document.getElementById("status-text");
+          if (pBar) {{
+            pBar.style.animation = "none";
+            pBar.style.marginLeft = "0";
+            pBar.style.width = "100%";
+          }}
+          if (sText) sText.textContent = "READY - LAUNCHING...";
+          setTimeout(() => {{
+            window.location.replace(targetUrl);
+          }}, 200);
+          return;
+        }}
+      }} catch (err) {{}}
+
+      if (attempts > 3) {{
+        const sText = document.getElementById("status-text");
+        if (sText) sText.textContent = "WARMING UP CLASSIFIER & CAMERA...";
+      }}
+      setTimeout(checkServerReady, 120);
+    }}
+    checkServerReady();
+  </script>
 </body>
 </html>"""
 
@@ -166,19 +206,8 @@ def find_free_port(preferred: int = 8000) -> int:
             s.bind(("127.0.0.1", 0))
             return int(s.getsockname()[1])
 
-def wait_for_server(url: str, timeout: float = 25.0) -> bool:
-    start = time.time()
-    while time.time() - start < timeout:
-        try:
-            with urllib.request.urlopen(f"{url}/api/health", timeout=1.0) as resp:
-                if resp.status == 200:
-                    return True
-        except Exception:
-            time.sleep(0.12)
-    return False
-
 def start_backend_server(port: int):
-    """Run uvicorn server in a dedicated thread."""
+    """Run uvicorn server in background thread."""
     from backend.main import app
 
     config = uvicorn.Config(
@@ -192,11 +221,11 @@ def start_backend_server(port: int):
     server.run()
 
 def apply_native_window_icon(window):
-    """Set the Win32 / WinForms window and taskbar icon."""
+    """Set the native Windows window and taskbar icon."""
     if sys.platform != "win32" or not os.path.exists(ICON_PATH):
         return
 
-    # 1. Try WinForms Form.Icon
+    # 1. WinForms Form.Icon
     try:
         import clr
         clr.AddReference("System.Drawing")
@@ -206,7 +235,7 @@ def apply_native_window_icon(window):
     except Exception:
         pass
 
-    # 2. Try Win32 SendMessageW (WM_SETICON)
+    # 2. Win32 SendMessageW (WM_SETICON)
     try:
         WM_SETICON = 0x0080
         ICON_SMALL = 0
@@ -225,29 +254,34 @@ def apply_native_window_icon(window):
     except Exception:
         pass
 
-def launch_server_and_load(window, port: int):
-    """Starts backend in background and loads URL into window when healthy."""
+def python_watchdog_transition(window, port: int):
+    """Python watchdog fallback to guarantee transition even if client fetch is blocked."""
     server_url = f"http://127.0.0.1:{port}"
-
-    # Start FastAPI Uvicorn backend in background thread
-    server_thread = threading.Thread(target=start_backend_server, args=(port,), daemon=True)
-    server_thread.start()
-
-    # Poll until server health endpoint responds
-    if wait_for_server(server_url, timeout=25.0):
-        # Brief pause to ensure full CSS/canvas readiness
-        time.sleep(0.35)
-        window.load_url(server_url)
-    else:
-        print(f"Error: AgriScan backend failed to respond at {server_url}", file=sys.stderr)
+    start = time.time()
+    while time.time() - start < 25.0:
+        try:
+            with urllib.request.urlopen(f"{server_url}/api/health", timeout=1.0) as resp:
+                if resp.status == 200:
+                    time.sleep(0.4)
+                    try:
+                        window.load_url(server_url)
+                    except Exception:
+                        pass
+                    return
+        except Exception:
+            time.sleep(0.15)
 
 def main():
     port = find_free_port(8000)
 
-    # 1. Create window immediately with instant splash screen
+    # 1. Start FastAPI server IMMEDIATELY in background daemon thread
+    server_thread = threading.Thread(target=start_backend_server, args=(port,), daemon=True)
+    server_thread.start()
+
+    # 2. Create window immediately with instant splash HTML
     window = webview.create_window(
         title="AgriScan - Precision Optical Grain Assessment",
-        html=generate_splash_html(),
+        html=generate_splash_html(port),
         width=1340,
         height=880,
         min_size=(980, 660),
@@ -255,15 +289,18 @@ def main():
         zoomable=True,
     )
 
-    def on_shown():
+    # 3. Python background watchdog to enforce fallback transition & icon application
+    def background_supervisor():
+        # Set icon after window initializes
+        time.sleep(0.4)
         apply_native_window_icon(window)
-        # Launch backend and load app into window when ready
-        bg_worker = threading.Thread(target=launch_server_and_load, args=(window, port), daemon=True)
-        bg_worker.start()
+        # Watchdog for URL transition
+        python_watchdog_transition(window, port)
 
-    window.events.shown += on_shown
+    supervisor_thread = threading.Thread(target=background_supervisor, daemon=True)
+    supervisor_thread.start()
 
-    # 2. Start webview GUI loop
+    # 4. Start native webview message loop
     webview.start(debug=False)
 
 if __name__ == "__main__":
