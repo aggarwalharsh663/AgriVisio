@@ -3,13 +3,16 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#f8fafc">
+    <meta name="theme-color" content="#f7f5ed">
     <title>AgriScan - Precision Optical Grain Quality Assessment</title>
-    <link rel="stylesheet" href="/style.css?v=20261029_v3">
-    <script src="/chamber.js?v=20261029_v3" defer></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@700;800;900&family=JetBrains+Mono:wght@500;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/style.css?v=20261029_harvest">
+    <script src="/chamber.js?v=20261029_harvest" defer></script>
     <script src="/vendor/chart.umd.js" defer></script>
     <script src="/vendor/qrcode.min.js" defer></script>
-    <script src="/app.js?v=20261029_v3" defer></script>
+    <script src="/app.js?v=20261029_harvest" defer></script>
   </head>
   <body>
     <div class="atmosphere" aria-hidden="true"></div>
@@ -19,10 +22,10 @@
         <a class="brand" href="/" aria-label="AgriScan home">
           <span class="brand-mark" aria-hidden="true">
             <svg viewBox="0 0 32 32" fill="none">
-              <circle cx="16" cy="16" r="13" stroke="currentColor" stroke-width="1.8" stroke-dasharray="3 3"/>
-              <circle cx="16" cy="16" r="8" stroke="var(--primary)" stroke-width="2"/>
-              <path d="M16 3v4M16 25v4M3 16h4M25 16h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-              <ellipse cx="16" cy="16" rx="3.5" ry="6.5" transform="rotate(35, 16, 16)" fill="var(--primary)" opacity="0.9"/>
+              <circle cx="16" cy="16" r="13" stroke="currentColor" stroke-width="2" stroke-dasharray="3 3"/>
+              <circle cx="16" cy="16" r="8" stroke="var(--primary)" stroke-width="2.5"/>
+              <path d="M16 3v4M16 25v4M3 16h4M25 16h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              <ellipse cx="16" cy="16" rx="3.5" ry="6.5" transform="rotate(35, 16, 16)" fill="var(--primary)" opacity="0.95"/>
             </svg>
           </span>
           <span class="brand-text">AGRI<span class="brand-accent">SCAN</span></span>
@@ -30,8 +33,7 @@
         <span class="demo-pill"><span class="demo-dot"></span> SIMULATED HARDWARE DEMO</span>
       </div>
       <div class="topbar-telemetry">
-        <span class="top-note">ISO / USDA Standard</span>
-        <span class="top-note-divider">|</span>
+        <span class="top-tag">LAB CV · 2026</span>
         <button class="theme-toggle-btn" id="theme-toggle" type="button" aria-label="Toggle light and dark mode">
           <span class="toggle-icon">☀️</span>
           <span class="toggle-label">Light</span>
@@ -42,20 +44,22 @@
     <main class="page-shell">
       <section class="intro" aria-labelledby="page-title">
         <div class="intro-content">
-          <p class="eyebrow">PRECISION OPTICAL INSPECTION PLATFORM</p>
-          <h1 id="page-title">From sample to <em>clear answers.</em></h1>
-          <p class="intro-copy">High-resolution optical assessment of rice lots, simulated color calibration, and grain-by-grain morphometrics.</p>
-          <ul class="intro-points">
-            <li>Simulated optical chamber</li>
-            <li>Matrix color calibration</li>
-            <li>Grain-by-grain quality report</li>
-          </ul>
-        </div>
-        <div class="sample-chip">
-          <span class="chip-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6"/><path d="M12 7v5l3 2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          </span>
-          <span><strong>Guided Pipeline</strong><small>Approx. 30 seconds</small></span>
+          <div class="hero-eyebrow">
+            <span class="hero-line" aria-hidden="true"></span>
+            <span class="hero-tag">OPTICAL GRAIN MORPHOMETRICS</span>
+            <span class="hero-pill-badge">SUB-MILLIMETER CV</span>
+          </div>
+          <h1 id="page-title" class="hero-title">
+            AUTONOMOUS RICE<br>
+            <span class="hero-highlight-banner">QUALITY ASSESSMENT</span>
+          </h1>
+          <p class="intro-copy">Calibrated multi-spectral computer vision for commercial grain classification, aspect ratios, and defect quantification.</p>
+          <div class="hero-feature-pills">
+            <span class="feature-pill"><span class="pill-icon">🛡</span> 12-Patch Color Balance</span>
+            <span class="feature-pill"><span class="pill-icon">⏱</span> 0.12 mm/px Precision</span>
+            <span class="feature-pill"><span class="pill-icon">🔬</span> Random Forest Classifier</span>
+            <span class="feature-pill"><span class="pill-icon">📋</span> SQLite Audit Ledger</span>
+          </div>
         </div>
       </section>
 

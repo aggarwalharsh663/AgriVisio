@@ -750,6 +750,10 @@
 	function applyTheme(mode) {
 		const isDark = mode === "dark";
 		document.documentElement.classList.toggle("dark", isDark);
+		const themeMeta = document.querySelector('meta[name="theme-color"]');
+		if (themeMeta) {
+			themeMeta.setAttribute("content", isDark ? "#0d0f14" : "#f7f5ed");
+		}
 		const toggleBtn = document.querySelector("#theme-toggle");
 		if (toggleBtn) {
 			const icon = toggleBtn.querySelector(".toggle-icon");
