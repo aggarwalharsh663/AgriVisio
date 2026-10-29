@@ -428,7 +428,7 @@
 		const qr = document.querySelector("#batch-qr");
 		qr.replaceChildren();
 		if (typeof window.QRCode === "function") {
-			new window.QRCode(qr, { text: `${window.location.origin}/api/batches/${encodeURIComponent(batch.batch_id)}`, width: 92, height: 92, colorDark: "#153d2b", colorLight: "#ffffff", correctLevel: window.QRCode.CorrectLevel.M });
+			new window.QRCode(qr, { text: `${window.location.origin}/api/batches/${encodeURIComponent(batch.batch_id)}`, width: 92, height: 92, colorDark: "#000000", colorLight: "#ffffff", correctLevel: window.QRCode.CorrectLevel.M });
 		} else {
 			qr.textContent = "QR unavailable";
 		}
@@ -437,8 +437,8 @@
 	renderReportCharts.create = function createCharts() {
 		destroyCharts();
 		if (typeof window.Chart !== "function") return;
-		const chartText = "#94a3b8";
-		const gridColor = "rgba(148, 163, 184, 0.12)";
+		const chartText = "#737373";
+		const gridColor = "rgba(255, 255, 255, 0.06)";
 		const qualityChart = new window.Chart(document.querySelector("#quality-chart"), {
 			type: "doughnut",
 			data: {
@@ -446,7 +446,7 @@
 				datasets: [{
 					data: categories.map(({ key }) => Number(batch.summary.counts[key] || 0)),
 					backgroundColor: ["#10b981", "#f43f5e", "#f59e0b", "#a855f7"],
-					borderColor: "#12181f",
+					borderColor: "#0d0d0d",
 					borderWidth: 3,
 					hoverOffset: 6
 				}]
@@ -458,11 +458,13 @@
 				plugins: {
 					legend: { display: false },
 					tooltip: {
-						backgroundColor: "#18222c",
-						titleColor: "#f8fafc",
-						bodyColor: "#e2e8f0",
-						borderColor: "rgba(255,255,255,0.12)",
+						backgroundColor: "#171717",
+						titleColor: "#ffffff",
+						bodyColor: "#d4d4d4",
+						borderColor: "rgba(255, 255, 255, 0.15)",
 						borderWidth: 1,
+						padding: 10,
+						cornerRadius: 6,
 						callbacks: { label: (item) => `${item.label}: ${item.raw} grains` }
 					}
 				}
@@ -476,11 +478,11 @@
 				datasets: [{
 					label: "Grains",
 					data: histogram.counts,
-					backgroundColor: "rgba(16, 185, 129, 0.45)",
-					borderColor: "#10b981",
-					borderWidth: 1.5,
+					backgroundColor: "rgba(245, 158, 11, 0.75)",
+					borderColor: "#f59e0b",
+					borderWidth: 1,
 					borderRadius: 4,
-					maxBarThickness: 32
+					maxBarThickness: 34
 				}]
 			},
 			options: {
@@ -489,11 +491,13 @@
 				plugins: {
 					legend: { display: false },
 					tooltip: {
-						backgroundColor: "#18222c",
-						titleColor: "#f8fafc",
-						bodyColor: "#e2e8f0",
-						borderColor: "rgba(255,255,255,0.12)",
-						borderWidth: 1
+						backgroundColor: "#171717",
+						titleColor: "#ffffff",
+						bodyColor: "#d4d4d4",
+						borderColor: "rgba(255, 255, 255, 0.15)",
+						borderWidth: 1,
+						padding: 10,
+						cornerRadius: 6,
 					}
 				},
 				scales: {
