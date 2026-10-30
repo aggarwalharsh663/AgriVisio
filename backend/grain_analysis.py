@@ -159,7 +159,7 @@ def _split_touching_grains(
     """Split touching foreground grains using distance-transform watershed."""
     height, width = foreground.shape
     distance = cv2.distanceTransform(foreground, cv2.DIST_L2, 5)
-    seed_spacing = max(9, min(31, round(min(height, width) * 0.018)))
+    seed_spacing = min(15, max(9, round(min(height, width) * 0.018)))
     seed_kernel = cv2.getStructuringElement(
         cv2.MORPH_ELLIPSE, (seed_spacing, seed_spacing)
     )
@@ -251,6 +251,14 @@ def segment_grains(
     )
     opened = cv2.morphologyEx(mask, cv2.MORPH_OPEN, opening_kernel)
     if split_touching:
+        # Suppress tray specular glare (bluish tray reflection vs warm grains)
+        b, _, r = cv2.split(image_bgr)
+        tray_glare = (
+            (b.astype(np.int16) - r.astype(np.int16) > 3)
+            & (r < 165)
+        )
+        opened[tray_glare] = 0
+
         contours = _split_touching_grains(image_bgr, opened)
         return sorted(contours, key=lambda contour: cv2.minAreaRect(contour)[0][0])
 
