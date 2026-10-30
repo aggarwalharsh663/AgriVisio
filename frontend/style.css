@@ -2076,3 +2076,163 @@ body {
 		flex-direction: column;
 	}
 }
+
+/* ==========================================================================
+   Print Stylesheet for Clean Report Downloading / Export
+   ========================================================================== */
+.print-only-header {
+	display: none;
+}
+
+@media print {
+	/* Hide entire application shell, navigation, stepper, background and buttons */
+	body {
+		background: #ffffff !important;
+		color: #0f172a !important;
+		margin: 0 !important;
+		padding: 12mm 15mm !important;
+		font-size: 11pt !important;
+		-webkit-print-color-adjust: exact !important;
+		print-color-adjust: exact !important;
+	}
+
+	.topbar,
+	.stepper,
+	.intro,
+	.page-footer,
+	.atmosphere,
+	#app-splash,
+	#step-1,
+	#step-2,
+	#step-3,
+	.report-heading,
+	.report-tabs,
+	.panel-actions,
+	.report-actions,
+	.table-hint,
+	.grain-filters,
+	.theme-toggle-btn,
+	#history-view {
+		display: none !important;
+	}
+
+	.page-shell {
+		max-width: 100% !important;
+		margin: 0 !important;
+		padding: 0 !important;
+	}
+
+	.wizard-card {
+		border: none !important;
+		background: transparent !important;
+		box-shadow: none !important;
+		padding: 0 !important;
+		margin: 0 !important;
+	}
+
+	#step-4 {
+		display: block !important;
+		border: none !important;
+		box-shadow: none !important;
+		padding: 0 !important;
+		margin: 0 !important;
+	}
+
+	#report-view {
+		display: block !important;
+	}
+
+	/* Elegant Professional Header with AgriScan Logo */
+	.print-only-header {
+		display: block !important;
+		margin-bottom: 24px !important;
+	}
+
+	.print-brand-row {
+		display: flex !important;
+		align-items: center !important;
+		gap: 16px !important;
+	}
+
+	.print-logo {
+		width: 68px !important;
+		height: 68px !important;
+		object-fit: contain !important;
+	}
+
+	.print-brand-text h1 {
+		font-family: var(--font-title), sans-serif !important;
+		font-size: 26pt !important;
+		font-weight: 900 !important;
+		letter-spacing: 0.08em !important;
+		color: #0f172a !important;
+		margin: 0 !important;
+		line-height: 1 !important;
+	}
+
+	.print-brand-text h1 span {
+		color: #d97706 !important;
+	}
+
+	.print-brand-text p {
+		font-family: var(--font-body), sans-serif !important;
+		font-size: 10pt !important;
+		font-weight: 600 !important;
+		color: #475569 !important;
+		margin-top: 4px !important;
+		letter-spacing: 0.02em !important;
+	}
+
+	.print-meta-divider {
+		height: 3px !important;
+		background: #d97706 !important;
+		margin-top: 14px !important;
+		margin-bottom: 20px !important;
+	}
+
+	/* Card and Grid Printing Adjustments */
+	.report-hero,
+	.summary-card,
+	.report-card,
+	.identity-card,
+	.report-note {
+		background: #f8fafc !important;
+		border: 1px solid #cbd5e1 !important;
+		box-shadow: none !important;
+		color: #0f172a !important;
+		break-inside: avoid !important;
+		page-break-inside: avoid !important;
+	}
+
+	.report-hero-sample h3,
+	.summary-card strong,
+	.batch-ref strong,
+	.report-total strong {
+		color: #0f172a !important;
+	}
+
+	.summary-card span,
+	.report-kicker,
+	.batch-ref span {
+		color: #475569 !important;
+	}
+
+	.chart-card {
+		page-break-inside: avoid !important;
+	}
+
+	.table-scroll {
+		overflow: visible !important;
+		max-height: none !important;
+	}
+
+	.grain-table th,
+	.grain-table td {
+		border-color: #cbd5e1 !important;
+		color: #0f172a !important;
+	}
+
+	.grain-table th {
+		background: #f1f5f9 !important;
+	}
+}
