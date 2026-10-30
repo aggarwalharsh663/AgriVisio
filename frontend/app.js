@@ -764,6 +764,13 @@
 	}
 
 	initTheme();
+	// Desktop app heartbeat watcher
+	function sendHeartbeat() {
+		fetch("/api/heartbeat", { method: "POST" }).catch(() => {});
+	}
+	sendHeartbeat();
+	setInterval(sendHeartbeat, 2000);
+
 	setTimeout(() => {
 		const splash = document.getElementById("app-splash");
 		if (splash) splash.classList.add("is-loaded");

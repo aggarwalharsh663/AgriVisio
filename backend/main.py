@@ -2,6 +2,7 @@ import hashlib
 import json
 import os
 import threading
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
@@ -439,9 +440,29 @@ async def add_no_cache_headers(request, call_next):
     return response
 
 
+_last_heartbeat_time = time.time()
+_has_received_heartbeat = False
+
+
 @app.get("/api/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.post("/api/heartbeat")
+def record_heartbeat():
+    global _last_heartbeat_time, _has_received_heartbeat
+    _last_heartbeat_time = time.time()
+    _has_received_heartbeat = True
+    return {"status": "alive"}
+
+
+@app.get("/api/heartbeat/status")
+def get_heartbeat_status():
+    return {
+        "active": _has_received_heartbeat,
+        "seconds_since_last": round(time.time() - _last_heartbeat_time, 2),
+    }
 
 
 @app.post("/api/scan")
