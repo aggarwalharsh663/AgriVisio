@@ -6,3 +6,8 @@ __pycache__/
 *.sqlite3
 data/*
 !data/.gitkeep
+
+.desktop_profile/
+.test_profile/
+*.log
+

@@ -2,8 +2,9 @@
 AgriScan - Standalone Windows Desktop Application Launcher
 Architecture:
 - High-performance FastAPI backend in background thread
-- Native standalone application window using Edge Chromium App Mode (with pywebview fallback)
+- Native standalone application window using Edge Chromium App Mode
 - Pure desktop experience: no browser tabs, no address bar, custom icon, instant 1s launch
+- Local AppData profile outside OneDrive to avoid file lock issues
 - Automatic clean shutdown on window close
 """
 
@@ -46,7 +47,7 @@ def wait_for_server(url: str, timeout: float = 15.0) -> bool:
     start = time.time()
     while time.time() - start < timeout:
         try:
-            with urllib.request.urlopen(f"{url}/api/health", timeout=0.5) as resp:
+            with urllib.request.urlopen(f"{url}/api/health", timeout=0.3) as resp:
                 if resp.status == 200:
                     return True
         except Exception:
@@ -80,7 +81,9 @@ def main():
     # 3. Launch standalone native desktop window
     edge_exe = find_edge_path()
     if edge_exe:
-        profile_dir = os.path.join(PROJECT_ROOT, ".desktop_profile")
+        # Crucial: Use %LOCALAPPDATA% on fast local drive, NOT inside OneDrive project folder!
+        profile_dir = os.path.join(os.environ.get("LOCALAPPDATA", PROJECT_ROOT), "AgriScanDesktop")
+        os.makedirs(profile_dir, exist_ok=True)
         cmd = [
             edge_exe,
             f"--app={server_url}",
@@ -93,7 +96,7 @@ def main():
         proc = subprocess.Popen(cmd)
         proc.wait()
     else:
-        # Fallback to pywebview if Edge is unavailable
+        # Fallback to webview or default browser if Edge is not found
         try:
             import webview
             icon_path = os.path.join(PROJECT_ROOT, "app_icon.ico")
