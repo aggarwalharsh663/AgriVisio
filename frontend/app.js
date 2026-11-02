@@ -644,7 +644,149 @@
 	document.querySelector("#tab-report").addEventListener("click", () => switchReportTab("report"));
 	document.querySelector("#tab-history").addEventListener("click", () => { switchReportTab("history"); loadHistory(); });
 	document.querySelector("#refresh-history").addEventListener("click", loadHistory);
-	document.querySelector("#download-report").addEventListener("click", () => window.print());
+	document.querySelector("#download-report").addEventListener("click", downloadReport);
+
+	async function downloadReport() {
+		const downloadBtn = document.querySelector("#download-report");
+		const originalText = downloadBtn.innerHTML;
+		const batchId = batch?.batch_id || document.querySelector("#identity-batch")?.textContent?.trim() || "AS-sample";
+
+		try {
+			downloadBtn.disabled = true;
+			downloadBtn.textContent = "Preparing...";
+
+			if (window.electronAPI && typeof window.electronAPI.saveReportPdf === "function") {
+				downloadBtn.textContent = "Saving PDF...";
+				const result = await window.electronAPI.saveReportPdf(batchId);
+				if (result?.success) {
+					downloadBtn.textContent = "✓ PDF Saved!";
+					announce(`Report PDF saved successfully.`);
+					setTimeout(() => {
+						downloadBtn.disabled = false;
+						downloadBtn.innerHTML = originalText;
+					}, 2500);
+					return;
+				} else if (result?.canceled) {
+					downloadBtn.disabled = false;
+					downloadBtn.innerHTML = originalText;
+					return;
+				}
+			}
+
+			// Web browser or fallback: download standalone clean HTML report & trigger print
+			downloadBtn.textContent = "Downloading...";
+			const reportDoc = generateStandaloneReportHtml(batch, batchId);
+			const blob = new Blob([reportDoc], { type: "text/html;charset=utf-8" });
+			const url = URL.createObjectURL(blob);
+			const link = document.createElement("a");
+			link.href = url;
+			link.download = `AgriScan-Report-${batchId}.html`;
+			document.body.appendChild(link);
+			link.click();
+			document.body.removeChild(link);
+			URL.revokeObjectURL(url);
+
+			try {
+				window.print();
+			} catch (e) {}
+
+			downloadBtn.textContent = "✓ Downloaded!";
+			announce(`Report downloaded as AgriScan-Report-${batchId}.html`);
+			setTimeout(() => {
+				downloadBtn.disabled = false;
+				downloadBtn.innerHTML = originalText;
+			}, 2500);
+		} catch (err) {
+			console.error("Report download error:", err);
+			downloadBtn.textContent = "Error saving";
+			setTimeout(() => {
+				downloadBtn.disabled = false;
+				downloadBtn.innerHTML = originalText;
+			}, 2500);
+		}
+	}
+
+	function generateStandaloneReportHtml(currentBatch, batchId) {
+		const sampleName = currentBatch?.sample_name || document.querySelector("#report-sample")?.textContent || "Sample";
+		const variety = currentBatch?.variety || document.querySelector("#report-variety")?.textContent || "Rice";
+		const totalGrains = currentBatch?.summary?.total_grains || currentBatch?.grains?.length || document.querySelector("#report-count")?.textContent || "0";
+		const dateStr = currentBatch?.created_at ? new Date(currentBatch.created_at).toLocaleString() : new Date().toLocaleString();
+		const goodPct = document.querySelector("#summary-good")?.textContent || "-";
+		const meanLength = document.querySelector("#mean-length")?.textContent || "-";
+		const meanWidth = document.querySelector("#mean-width")?.textContent || "-";
+		const fingerprint = currentBatch?.fingerprint || document.querySelector("#fingerprint-hash")?.textContent || "-";
+
+		const grains = currentBatch?.grains || [];
+		let rowsHtml = "";
+		for (const g of grains) {
+			const label = categories.find(c => c.key === g.label)?.label || g.label;
+			const conf = Math.round(Number(g.confidence || 0) * 100);
+			const len = Number(g.length_mm).toFixed(2);
+			const wid = Number(g.width_mm).toFixed(2);
+			rowsHtml += `<tr>
+				<td>${g.id}</td>
+				<td><strong>${label}</strong></td>
+				<td>${len} mm</td>
+				<td>${wid} mm</td>
+				<td>${conf}%</td>
+				<td><small>${g.reason || ""}</small></td>
+			</tr>`;
+		}
+
+		return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>AgriScan Report - ${batchId}</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #ffffff; color: #0f172a; padding: 32px; line-height: 1.5; }
+  .header { display: flex; align-items: center; gap: 18px; margin-bottom: 24px; border-bottom: 3px solid #d97706; padding-bottom: 18px; }
+  .logo { width: 64px; height: 64px; object-fit: contain; }
+  .header-text h1 { font-size: 26px; font-weight: 900; letter-spacing: 0.05em; color: #0f172a; }
+  .header-text h1 span { color: #d97706; }
+  .header-text p { font-size: 13px; color: #64748b; font-weight: 600; }
+  .hero-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 24px; }
+  .card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; }
+  .card span { font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: 700; letter-spacing: 0.05em; display: block; margin-bottom: 4px; }
+  .card strong { font-size: 22px; color: #0f172a; display: block; }
+  .card small { font-size: 12px; color: #64748b; }
+  h2 { font-size: 16px; margin: 28px 0 12px; color: #0f172a; }
+  table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
+  th, td { border: 1px solid #e2e8f0; padding: 8px 12px; text-align: left; }
+  th { background: #f1f5f9; font-weight: 700; color: #334155; }
+  tr:nth-child(even) { background: #f8fafc; }
+  .footer { margin-top: 36px; padding-top: 16px; border-top: 1px solid #e2e8f0; font-size: 11px; color: #94a3b8; display: flex; justify-content: space-between; }
+</style>
+</head>
+<body>
+  <div class="header">
+    <img src="/assets/emblem.png" class="logo" alt="AgriScan Logo">
+    <div class="header-text">
+      <h1>AGRI<span>SCAN</span></h1>
+      <p>Precision Optical Grain Quality Assessment Report</p>
+    </div>
+  </div>
+  <div class="hero-grid">
+    <div class="card"><span>Sample Name</span><strong>${sampleName}</strong><small>${variety}</small></div>
+    <div class="card"><span>Assessment ID</span><strong>${batchId}</strong><small>${dateStr}</small></div>
+    <div class="card"><span>Total Grains</span><strong>${totalGrains}</strong><small>optically checked</small></div>
+    <div class="card"><span>Good Grains</span><strong>${goodPct}</strong><small>of batch sample</small></div>
+    <div class="card"><span>Mean Length</span><strong>${meanLength} mm</strong><small>calibrated length</small></div>
+    <div class="card"><span>Mean Width</span><strong>${meanWidth} mm</strong><small>calibrated width</small></div>
+  </div>
+  <h2>Detailed Grain Measurements (${grains.length} grains)</h2>
+  <table>
+    <thead><tr><th>#</th><th>Class</th><th>Length</th><th>Width</th><th>Confidence</th><th>Reason</th></tr></thead>
+    <tbody>${rowsHtml}</tbody>
+  </table>
+  <div class="footer">
+    <span>AgriScan Precision Optics • Laboratory Assessment Report</span>
+    <span>Fingerprint: <code>${fingerprint}</code></span>
+  </div>
+</body>
+</html>`;
+	}
 
 	function switchReportTab(tab) {
 		const isHistory = tab === "history";

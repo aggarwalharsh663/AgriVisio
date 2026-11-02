@@ -1,0 +1,8 @@
+{
+  "name": "agriscan",
+  "version": "1.0.0",
+  "description": "AgriScan - Precision Optical Grain Assessment",
+  "main": "main.cjs",
+  "author": "AgriScan",
+  "license": "ISC"
+}
