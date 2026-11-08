@@ -133,20 +133,25 @@
             <div class="field">
               <span>Photo source</span>
               <select id="scan-source" name="scan_source" class="sr-only" tabindex="-1" aria-hidden="true">
-                <option value="simulated">Simulated sample</option>
+                <option value="scanner">Flatbed scanner</option>
                 <option value="upload">Upload a photo</option>
+                <option value="simulated">Simulated sample</option>
               </select>
               <div class="choice-cards" role="group" aria-label="Photo source">
-                <button class="choice-card is-selected" type="button" data-source="simulated">
-                  <strong>Simulated sample</strong>
-                  <small>Use the virtual optical chamber</small>
+                <button class="choice-card" type="button" data-source="scanner">
+                  <strong>Flatbed scanner</strong>
+                  <small>Capture directly from attached scanner</small>
                 </button>
                 <button class="choice-card" type="button" data-source="upload">
                   <strong>Upload a photo</strong>
                   <small>Analyze your own rice image</small>
                 </button>
+                <button class="choice-card" type="button" data-source="simulated">
+                  <strong>Simulated sample</strong>
+                  <small>Use the virtual optical chamber</small>
+                </button>
               </div>
-              <small>Choose between simulated laboratory scan or photo file analysis.</small>
+              <small>Choose between direct scanner acquisition, photo file analysis, or simulated chamber.</small>
             </div>
 
             <!-- UPLOAD PHOTO DROPZONE (Only visible in upload mode) -->

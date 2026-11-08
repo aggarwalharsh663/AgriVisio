@@ -341,12 +341,21 @@ def _make_uploaded_batch(
     is_blue_tray = (b_med > r_med + 35)
 
     if is_blue_tray:
+        # Standard flatbed scanner / blue optical tray
+        # Flatbed scan at 72-75 DPI gives ~0.3387 mm/pixel (e.g. mobile photo of screen)
+        # Direct 300 DPI Epson Perfection V600 scan gives 0.09173 mm/pixel with optical magnification
         height, width = image.shape[:2]
-        scale_mm_per_pixel = 228.0 / float(min(height, width))
+        if min(height, width) < 1500:
+            scale_mm_per_pixel = 25.4 / 75.0
+        else:
+            scale_mm_per_pixel = 0.09173
         estimate_note = f"Calibrated scanner bed scale: {scale_mm_per_pixel:.4f} mm/pixel. "
     elif "1121" in variety or "1121" in sample_name:
         height, width = image.shape[:2]
-        scale_mm_per_pixel = 228.0 / float(min(height, width))
+        if min(height, width) < 1500:
+            scale_mm_per_pixel = 25.4 / 75.0
+        else:
+            scale_mm_per_pixel = 0.09173
         estimate_note = f"Calibrated optical scale: {scale_mm_per_pixel:.4f} mm/pixel (1121 benchmark). "
     else:
         scale_mm_per_pixel = ESTIMATED_MM_PER_PIXEL

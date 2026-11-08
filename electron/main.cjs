@@ -234,6 +234,35 @@ function registerProtocolHandler() {
         });
       }
 
+      // 4b. API: /api/scan/hardware (Epson scanner capture)
+      if (pathname === '/api/scan/hardware' && req.method === 'POST') {
+        const body = await req.json().catch(() => ({}));
+        try {
+          const result = await sendIpcRequest('scan_hardware', body, 120000);
+          return new Response(JSON.stringify(result), {
+            headers: { 'content-type': 'application/json' },
+          });
+        } catch (err) {
+          const msg = err.message || '';
+          if (msg.includes('No scanner') || msg.includes('scanner not found') || msg.includes('no scanner')) {
+            return new Response(JSON.stringify({
+              error: 'scanner_not_found',
+              detail: 'No scanner detected. Connect a scanner or upload a photo instead.',
+            }), {
+              status: 404,
+              headers: { 'content-type': 'application/json' },
+            });
+          }
+          return new Response(JSON.stringify({
+            error: 'scan_failed',
+            detail: msg || 'Scanner capture failed.',
+          }), {
+            status: 500,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+      }
+
       // 5. API: /api/scan/upload (Multipart photo upload)
       if (pathname === '/api/scan/upload' && req.method === 'POST') {
         const formData = await req.formData();

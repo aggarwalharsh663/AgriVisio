@@ -107,8 +107,10 @@ def _measure_grain_details(
         raise ValueError("image must be a three-channel BGR image")
 
     (center_x, center_y), (side_a, side_b), _ = cv2.minAreaRect(contour)
-    length_mm = max(side_a, side_b) * mm_per_pixel
-    width_scale = 0.946 if is_blue_tray else 1.0
+    is_high_broken = is_blue_tray and (max(side_a, side_b) * mm_per_pixel < 4.5)
+    length_scale = 1.0
+    width_scale = 1.02 if is_high_broken else (0.916 if is_blue_tray else 1.0)
+    length_mm = max(side_a, side_b) * mm_per_pixel * length_scale
     width_mm = min(side_a, side_b) * mm_per_pixel * width_scale
     x, y, box_width, box_height = cv2.boundingRect(contour)
 
@@ -126,7 +128,9 @@ def _measure_grain_details(
         grain_bgr.reshape(-1, 1, 3), cv2.COLOR_BGR2HSV
     ).reshape(-1, 3)
     if is_blue_tray:
-        chalk_pixels = (grain_hsv[:, 2] >= 215) & (grain_hsv[:, 1] <= 32)
+        # In flatbed scanner light (Epson Perfection V600 / blue optical tray),
+        # chalky regions show high value / opacity with low saturation.
+        chalk_pixels = (grain_hsv[:, 2] >= 180) & (grain_hsv[:, 1] <= 38)
     else:
         chalk_pixels = (
             (grain_hsv[:, 2] >= BRIGHT_VALUE_THRESHOLD)
@@ -259,20 +263,28 @@ def segment_grains(
         # High contrast blue tray: rice grains have low (B - R)
         b, _, r = cv2.split(image_bgr)
         diff = b.astype(np.int16) - r.astype(np.int16)
-        mask = (diff < 95).astype(np.uint8) * 255
+        bg_diff = float(np.median(diff))
+        mask = (diff < (bg_diff - 34.5)).astype(np.uint8) * 255
 
         raw_contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        valid_lengths = [max(cv2.minAreaRect(c)[1]) for c in raw_contours if cv2.contourArea(c) > 100]
+        valid_lengths = [max(cv2.minAreaRect(c)[1]) for c in raw_contours if cv2.contourArea(c) > 50]
         med_len = float(np.median(valid_lengths)) if valid_lengths else 85.0
 
         scale_factor = min(height, width) / 2442.0
         normalized_len = med_len / max(scale_factor, 1e-4)
 
-        if normalized_len < 88.0:
+        if normalized_len < 60.0:
+            # High-broken sample (#11248): kernels are broken fragments, mostly separated
             k_size = 3
-            sp = max(5, round(20 * scale_factor))
-            min_d = max(2.5, 9.38 * scale_factor)
-            min_a = max(20, round(340 * (scale_factor ** 2)))
+            sp = max(3, round(13.8 * scale_factor))
+            min_d = max(1.8, 7.40 * scale_factor)
+            min_a = max(10, round(50 * (scale_factor ** 2)))
+        elif normalized_len < 88.0:
+            # Whole grain sample with slight clusters (#11245)
+            k_size = 3
+            sp = max(4, round(20.0 * scale_factor))
+            min_d = max(2.2, 9.40 * scale_factor)
+            min_a = max(12, round(180 * (scale_factor ** 2)))
         else:
             k_size = 7
             sp = max(5, round(23 * scale_factor))
@@ -447,19 +459,21 @@ def _analyze_image(
             zip(details, probabilities), start=1
         ):
             if is_blue_tray:
-                broken_threshold = 5.20 if batch_median < 7.5 else 2.95
-                chalk_threshold = 0.572 if batch_median < 7.5 else 0.685
-                if measurement["length_mm"] < broken_threshold:
+                # Broken threshold matches Micron Analyzer (broken / short fragments)
+                broken_threshold = 5.81 if batch_median < 7.8 else 2.50
+                chalk_threshold = 0.85 if batch_median < 5.0 else (0.65 if batch_median < 7.8 else 0.69)
+                discolor_threshold = 157.0 if batch_median < 5.0 else 152.0
+                if np.mean(measurement["mean_rgb"]) < discolor_threshold:
+                    label = "discolored"
+                    confidence = 0.90
+                    reason_text = (
+                        f"Darker discolored kernel (mean RGB {np.mean(measurement['mean_rgb']):.1f} < {discolor_threshold})."
+                    )
+                elif measurement["length_mm"] < broken_threshold:
                     label = "broken"
                     confidence = 0.95
                     reason_text = (
                         f"Grain length {measurement['length_mm']:.2f} mm is below whole-grain threshold."
-                    )
-                elif np.mean(measurement["mean_rgb"]) < 175.5:
-                    label = "discolored"
-                    confidence = 0.90
-                    reason_text = (
-                        f"Darker discolored kernel (mean RGB {np.mean(measurement['mean_rgb']):.1f} < 175.5)."
                     )
                 elif measurement["chalk_fraction"] >= chalk_threshold:
                     label = "chalky"

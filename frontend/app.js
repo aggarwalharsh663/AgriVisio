@@ -63,19 +63,29 @@
 	}
 
 	function updateScanSource() {
-		const uploading = scanSource.value === "upload";
+		const source = scanSource.value;
+		const uploading = source === "upload";
+		const scanning = source === "scanner";
 		uploadField.hidden = !uploading;
 		photoInput.disabled = !uploading;
 		photoInput.required = uploading;
 		const chamberFigure = document.querySelector("#chamber-figure");
-		if (chamberFigure) chamberFigure.hidden = uploading;
+		if (chamberFigure) chamberFigure.hidden = uploading || scanning;
 		const grainCountField = document.querySelector("#grain-count-field");
-		if (grainCountField) grainCountField.hidden = uploading;
+		if (grainCountField) grainCountField.hidden = uploading || scanning;
 		const lightingField = document.querySelector(".lighting-field");
-		if (lightingField) lightingField.hidden = uploading;
-		document.querySelector("#scan-button .button-label").textContent = uploading ? "Upload & analyze photo" : "Pour rice and scan";
+		if (lightingField) lightingField.hidden = uploading || scanning;
+		let label;
+		if (uploading) {
+			label = "Upload & analyze photo";
+		} else if (scanning) {
+			label = "Scan from flatbed scanner";
+		} else {
+			label = "Pour rice and scan";
+		}
+		document.querySelector("#scan-button .button-label").textContent = label;
 		document.querySelectorAll("[data-source]").forEach((card) => {
-			card.classList.toggle("is-selected", card.dataset.source === scanSource.value);
+			card.classList.toggle("is-selected", card.dataset.source === source);
 		});
 	}
 
@@ -93,9 +103,14 @@
 	function setLoading(loading) {
 		scanButton.disabled = loading;
 		scanButton.classList.toggle("is-loading", loading);
-		scanButton.querySelector(".button-label").textContent = loading
-			? scanSource.value === "upload" ? "Analyzing photo..." : "Scanning sample..."
-			: scanSource.value === "upload" ? "Upload & analyze photo" : "Pour rice and scan";
+		const source = scanSource.value;
+		let label;
+		if (loading) {
+			label = source === "upload" ? "Analyzing photo..." : source === "scanner" ? "Scanning from flatbed..." : "Scanning sample...";
+		} else {
+			label = source === "upload" ? "Upload & analyze photo" : source === "scanner" ? "Scan from flatbed scanner" : "Pour rice and scan";
+		}
+		scanButton.querySelector(".button-label").textContent = label;
 		form.setAttribute("aria-busy", String(loading));
 	}
 
@@ -809,15 +824,24 @@
 			n_grains: Number(slider.value),
 		};
 		if (!payload.sample_name || !payload.variety) { showFriendlyError("Please enter both a sample name and a rice variety to continue."); return; }
-		const uploadingPhoto = scanSource.value === "upload";
+		const currentSource = scanSource.value;
+		const uploadingPhoto = currentSource === "upload";
+		const scanningHardware = currentSource === "scanner";
 		const photo = photoInput.files[0];
 		if (uploadingPhoto && !photo) { showFriendlyError("Choose a rice photo before starting the analysis."); return; }
 		if (uploadingPhoto && photo.size > 10 * 1024 * 1024) { showFriendlyError("Choose a photo that is 10 MB or smaller."); return; }
 		setLoading(true);
 		try {
-			let endpoint = "/api/scan";
+			let endpoint;
 			let requestOptions;
-			if (uploadingPhoto) {
+			if (scanningHardware) {
+				endpoint = "/api/scan/hardware";
+				requestOptions = {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify(payload),
+				};
+			} else if (uploadingPhoto) {
 				const formData = new FormData();
 				formData.append("image", photo);
 				formData.append("sample_name", payload.sample_name);
@@ -827,14 +851,22 @@
 				requestOptions = { method: "POST", body: formData };
 			} else {
 				await runChamberEffects();
+				endpoint = "/api/scan";
 				requestOptions = {
 					method: "POST",
 					headers: { "Content-Type": "application/json" },
 					body: JSON.stringify(payload),
 				};
 			}
-			const response = await fetch(endpoint, requestOptions);
-			const result = await response.json().catch(() => ({}));
+			let response = await fetch(endpoint, requestOptions);
+			let result = await response.json().catch(() => ({}));
+			if (scanningHardware && !response.ok && result.error === "scanner_not_found") {
+				setLoading(false);
+				showFriendlyError("No flatbed scanner detected. Please select a rice photo to upload instead.");
+				scanSource.value = "upload";
+				updateScanSource();
+				return;
+			}
 			if (!response.ok) throw new Error(typeof result.detail === "string" ? result.detail : "The scan service could not complete the request.");
 			if (!result.images || !result.calibration || !result.summary || !Array.isArray(result.grains)) throw new Error("The scan returned incomplete results. Please try again.");
 			batch = result;
@@ -843,7 +875,7 @@
 			furthestStep = 4;
 			setStep(2);
 		} catch (error) {
-			const detail = error instanceof TypeError ? "We couldn’t reach the scan service. Check that the simulated backend is running, then try again." : error.message;
+			const detail = error instanceof TypeError ? "We couldn't reach the scan service. Check that the backend is running, then try again." : error.message;
 			showFriendlyError(detail || "Something went wrong while scanning. Please try again.");
 		} finally { setLoading(false); }
 	});
@@ -906,6 +938,9 @@
 	}
 
 	initTheme();
+	// Default to scanner mode
+	scanSource.value = "scanner";
+	updateScanSource();
 	// Desktop app heartbeat watcher
 	function sendHeartbeat() {
 		fetch("/api/heartbeat", { method: "POST" }).catch(() => {});
