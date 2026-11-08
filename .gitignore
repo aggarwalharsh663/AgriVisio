@@ -13,3 +13,5 @@ data/*
 electron/dist/
 *.exe
 
+
+scratch/

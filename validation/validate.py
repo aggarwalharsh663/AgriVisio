@@ -26,24 +26,41 @@ def compare(ground_truth_json_path, grains):
     for grain in grains:
         _validate_grain(grain, truth=False)
 
-    # Sort all valid candidate pairs by distance so the closest grains match first.
-    candidates = []
+    # Prefer nearby truth centres while allowing earlier choices to be reassigned.
+    candidates = [[] for _ in grains]
     for predicted_index, prediction in enumerate(grains):
         for truth_index, truth in enumerate(ground_truth):
             distance = math.dist(prediction["center"], truth["center"])
             if distance < MATCH_DISTANCE_PX:
-                candidates.append((distance, predicted_index, truth_index))
-    candidates.sort()
+                candidates[predicted_index].append((distance, truth_index))
+        candidates[predicted_index].sort()
 
-    matched_predictions = set()
-    matched_truth = set()
-    matched_pairs = []
-    for _, predicted_index, truth_index in candidates:
-        if predicted_index in matched_predictions or truth_index in matched_truth:
-            continue
-        matched_predictions.add(predicted_index)
-        matched_truth.add(truth_index)
-        matched_pairs.append((grains[predicted_index], ground_truth[truth_index]))
+    truth_to_prediction = {}
+
+    def assign(predicted_index, visited_truth):
+        for _, truth_index in candidates[predicted_index]:
+            if truth_index in visited_truth:
+                continue
+            visited_truth.add(truth_index)
+            previous_prediction = truth_to_prediction.get(truth_index)
+            if previous_prediction is None or assign(
+                previous_prediction, visited_truth
+            ):
+                truth_to_prediction[truth_index] = predicted_index
+                return True
+        return False
+
+    for predicted_index in range(len(grains)):
+        assign(predicted_index, set())
+
+    matched_pairs = [
+        (grains[predicted_index], ground_truth[truth_index])
+        for truth_index, predicted_index in sorted(truth_to_prediction.items())
+    ]
+    matched_predictions = {
+        predicted_index for predicted_index in truth_to_prediction.values()
+    }
+    matched_truth = set(truth_to_prediction)
 
     confusion = [[0 for _ in LABELS] for _ in LABELS]
     for prediction, truth in matched_pairs:
