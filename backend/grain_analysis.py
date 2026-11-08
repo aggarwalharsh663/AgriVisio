@@ -260,17 +260,31 @@ def segment_grains(
         b, _, r = cv2.split(image_bgr)
         diff = b.astype(np.int16) - r.astype(np.int16)
         mask = (diff < 95).astype(np.uint8) * 255
-        k_size = max(3, (round(7 * min(height, width) / 2442) // 2) * 2 + 1)
+
+        raw_contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        valid_lengths = [max(cv2.minAreaRect(c)[1]) for c in raw_contours if cv2.contourArea(c) > 100]
+        med_len = float(np.median(valid_lengths)) if valid_lengths else 85.0
+
+        scale_factor = min(height, width) / 2442.0
+        normalized_len = med_len / max(scale_factor, 1e-4)
+
+        if normalized_len < 88.0:
+            k_size = 3
+            sp = max(5, round(20 * scale_factor))
+            min_d = max(2.5, 9.38 * scale_factor)
+            min_a = max(20, round(340 * (scale_factor ** 2)))
+        else:
+            k_size = 7
+            sp = max(5, round(23 * scale_factor))
+            min_d = max(2.5, 9.5 * scale_factor)
+            min_a = max(20, round(200 * (scale_factor ** 2)))
+
         opened = cv2.morphologyEx(
             mask,
             cv2.MORPH_OPEN,
             cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k_size, k_size)),
         )
         if split_touching:
-            scale_factor = min(height, width) / 2442.0
-            sp = max(5, round(23 * scale_factor))
-            min_d = max(2.5, 9.5 * scale_factor)
-            min_a = max(20, round(200 * (scale_factor ** 2)))
             contours = _split_touching_grains(
                 image_bgr, opened, seed_spacing=sp, min_distance=min_d, min_area=min_a
             )
@@ -433,13 +447,21 @@ def _analyze_image(
             zip(details, probabilities), start=1
         ):
             if is_blue_tray:
-                if measurement["length_mm"] < 2.95:
+                broken_threshold = 5.20 if batch_median < 7.5 else 2.95
+                chalk_threshold = 0.572 if batch_median < 7.5 else 0.685
+                if measurement["length_mm"] < broken_threshold:
                     label = "broken"
                     confidence = 0.95
                     reason_text = (
                         f"Grain length {measurement['length_mm']:.2f} mm is below whole-grain threshold."
                     )
-                elif measurement["chalk_fraction"] >= 0.685:
+                elif np.mean(measurement["mean_rgb"]) < 175.5:
+                    label = "discolored"
+                    confidence = 0.90
+                    reason_text = (
+                        f"Darker discolored kernel (mean RGB {np.mean(measurement['mean_rgb']):.1f} < 175.5)."
+                    )
+                elif measurement["chalk_fraction"] >= chalk_threshold:
                     label = "chalky"
                     confidence = 0.92
                     reason_text = (
