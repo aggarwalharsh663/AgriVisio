@@ -1,22 +1,55 @@
-const { app, BrowserWindow, shell, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, protocol, shell, ipcMain, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
-const http = require('http');
+const readline = require('readline');
 const { spawn, exec } = require('child_process');
+const crypto = require('crypto');
+
+// Register custom scheme 'app' before ready - ZERO NETWORK PORTS
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'app',
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+      stream: true,
+      bypassCSP: true,
+    },
+  },
+]);
+
+const LOG_FILE = path.join(__dirname, 'electron.log');
+function log(...args) {
+  const msg = `[${new Date().toISOString()}] ${args.join(' ')}`;
+  try { fs.appendFileSync(LOG_FILE, msg + '\n', 'utf-8'); } catch (e) {}
+  console.log(msg);
+}
+
+process.on('uncaughtException', (err) => {
+  log('UNCAUGHT EXCEPTION:', err && err.stack ? err.stack : err);
+});
+process.on('unhandledRejection', (reason) => {
+  log('UNHANDLED REJECTION:', reason);
+});
 
 let mainWindow = null;
 let splashWindow = null;
-let backendProcess = null;
+let pythonProcess = null;
 let isQuitting = false;
-
-const BACKEND_PORT = 8000;
-const APP_URL = `http://127.0.0.1:${BACKEND_PORT}`;
 
 // Directory paths
 const ELECTRON_DIR = __dirname;
 const ROOT_DIR = path.resolve(ELECTRON_DIR, '..');
 const BACKEND_DIR = path.join(ROOT_DIR, 'backend');
 const FRONTEND_DIR = path.join(ROOT_DIR, 'frontend');
+const DATA_DIR = path.join(ROOT_DIR, 'data');
+const TEMP_UPLOADS = path.join(DATA_DIR, 'temp_uploads');
+
+if (!fs.existsSync(TEMP_UPLOADS)) {
+  try { fs.mkdirSync(TEMP_UPLOADS, { recursive: true }); } catch (e) {}
+}
 
 const candidatePythons = [
   path.join(BACKEND_DIR, 'python', 'python.exe'),
@@ -26,6 +59,7 @@ const candidatePythons = [
   path.join(ROOT_DIR, 'python.exe'),
 ];
 let PYTHON_EXE = candidatePythons.find((p) => fs.existsSync(p)) || 'python';
+const WORKER_SCRIPT = path.join(BACKEND_DIR, 'ipc_worker.py');
 
 const ICON_PATH = path.join(ROOT_DIR, 'app_icon.ico');
 const LOGO_PATH = path.join(FRONTEND_DIR, 'assets', 'logo.png');
@@ -35,6 +69,281 @@ if (fs.existsSync(LOGO_PATH)) {
   try {
     logoBase64 = fs.readFileSync(LOGO_PATH).toString('base64');
   } catch (e) {}
+}
+
+// --- Portless Python IPC Bridge (stdin / stdout pipes) ---
+const pendingRequests = new Map();
+let isWorkerReady = false;
+let workerReadyResolve = null;
+const workerReadyPromise = new Promise((resolve) => {
+  workerReadyResolve = resolve;
+});
+
+function startPythonWorker() {
+  log('Spawning portless Python worker:', PYTHON_EXE, WORKER_SCRIPT);
+
+  pythonProcess = spawn(
+    PYTHON_EXE,
+    [WORKER_SCRIPT],
+    {
+      cwd: ROOT_DIR,
+      windowsHide: true,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: Object.assign({}, process.env, {
+        PYTHONPATH: ROOT_DIR,
+        PYTHONUNBUFFERED: '1',
+      }),
+    }
+  );
+
+  const rl = readline.createInterface({
+    input: pythonProcess.stdout,
+    crlfDelay: Infinity,
+  });
+
+  rl.on('line', (line) => {
+    line = line.trim();
+    if (!line) return;
+    try {
+      const msg = JSON.parse(line);
+      if (msg.event === 'ready') {
+        log('Python worker is READY (Portless IPC established).');
+        isWorkerReady = true;
+        if (workerReadyResolve) workerReadyResolve();
+        return;
+      }
+
+      const reqId = msg.id;
+      if (reqId && pendingRequests.has(reqId)) {
+        const { resolve, reject } = pendingRequests.get(reqId);
+        pendingRequests.delete(reqId);
+        if (msg.ok) {
+          resolve(msg.result);
+        } else {
+          reject(new Error(msg.error || 'Worker request failed.'));
+        }
+      }
+    } catch (e) {
+      log('Worker stdout parse error:', e.message, line);
+    }
+  });
+
+  pythonProcess.stderr.on('data', (data) => {
+    log('[Python stderr]', data.toString().trim());
+  });
+
+  pythonProcess.on('error', (err) => {
+    log('Python process spawn error:', err);
+  });
+
+  pythonProcess.on('exit', (code, signal) => {
+    log(`Python process exited with code ${code}, signal ${signal}`);
+    for (const [id, { reject }] of pendingRequests.entries()) {
+      reject(new Error('Python worker terminated unexpectedly.'));
+    }
+    pendingRequests.clear();
+  });
+}
+
+function sendIpcRequest(action, data = {}, timeoutMs = 60000) {
+  return new Promise(async (resolve, reject) => {
+    if (!isWorkerReady) {
+      await Promise.race([
+        workerReadyPromise,
+        new Promise((_, r) => setTimeout(() => r(new Error('Timed out waiting for Python worker to initialize.')), 25000)),
+      ]);
+    }
+
+    if (!pythonProcess || pythonProcess.killed) {
+      return reject(new Error('Python worker is not running.'));
+    }
+
+    const reqId = crypto.randomUUID();
+    const timer = setTimeout(() => {
+      if (pendingRequests.has(reqId)) {
+        pendingRequests.delete(reqId);
+        reject(new Error(`Request '${action}' timed out after ${timeoutMs}ms.`));
+      }
+    }, timeoutMs);
+
+    pendingRequests.set(reqId, {
+      resolve: (res) => { clearTimeout(timer); resolve(res); },
+      reject: (err) => { clearTimeout(timer); reject(err); },
+    });
+
+    const payload = JSON.stringify({ id: reqId, action, data }) + '\n';
+    pythonProcess.stdin.write(payload, 'utf-8');
+  });
+}
+
+// --- MIME types for file serving ---
+const mimeTypes = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+  '.webm': 'video/webm',
+  '.mp4': 'video/mp4',
+};
+
+// --- Custom app:// Protocol Handler (Zero Network Ports) ---
+function registerProtocolHandler() {
+  protocol.handle('app', async (req) => {
+    try {
+      const parsedUrl = new URL(req.url);
+      let pathname = decodeURIComponent(parsedUrl.pathname);
+
+      // 1. API: /api/health
+      if (pathname === '/api/health') {
+        const result = await sendIpcRequest('health', {});
+        return new Response(JSON.stringify(result), {
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+
+      // 2. API: /api/heartbeat
+      if (pathname === '/api/heartbeat') {
+        const result = await sendIpcRequest('heartbeat', {});
+        return new Response(JSON.stringify(result), {
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+
+      // 3. API: /api/heartbeat/status
+      if (pathname === '/api/heartbeat/status') {
+        return new Response(JSON.stringify({ active: true, seconds_since_last: 0 }), {
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+
+      // 4. API: /api/scan (Simulated optical scan)
+      if (pathname === '/api/scan' && req.method === 'POST') {
+        const body = await req.json().catch(() => ({}));
+        const result = await sendIpcRequest('scan', body);
+        return new Response(JSON.stringify(result), {
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+
+      // 5. API: /api/scan/upload (Multipart photo upload)
+      if (pathname === '/api/scan/upload' && req.method === 'POST') {
+        const formData = await req.formData();
+        const file = formData.get('image') || formData.get('file');
+        if (!file) {
+          return new Response(JSON.stringify({ detail: 'No photo uploaded.' }), {
+            status: 400,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+
+        const ext = path.extname(file.name || 'uploaded.jpg').toLowerCase() || '.jpg';
+        const tempName = `upload-${crypto.randomUUID()}${ext}`;
+        const tempPath = path.join(TEMP_UPLOADS, tempName);
+
+        const arrayBuffer = await file.arrayBuffer();
+        fs.writeFileSync(tempPath, Buffer.from(arrayBuffer));
+
+        try {
+          const result = await sendIpcRequest('scan_upload', {
+            file_path: tempPath,
+            sample_name: formData.get('sample_name') || '',
+            variety: formData.get('variety') || '',
+            lighting: formData.get('lighting') || 'ring_light',
+          });
+
+          return new Response(JSON.stringify(result), {
+            headers: { 'content-type': 'application/json' },
+          });
+        } finally {
+          try {
+            if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+          } catch (e) {}
+        }
+      }
+
+      // 6. API: /api/batches
+      if (pathname === '/api/batches' && req.method === 'GET') {
+        const result = await sendIpcRequest('list_batches', {});
+        return new Response(JSON.stringify(result), {
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+
+      // 7. API: /api/batches/:batch_id
+      const batchMatch = pathname.match(/^\/api\/batches\/([^/]+)$/);
+      if (batchMatch && req.method === 'GET') {
+        const batchId = decodeURIComponent(batchMatch[1]);
+        const result = await sendIpcRequest('get_batch', { batch_id: batchId });
+        return new Response(JSON.stringify(result), {
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+
+      // 8. Static uploaded media & batch files (/files/...)
+      if (pathname.startsWith('/files/')) {
+        const rel = pathname.slice('/files/'.length);
+        const filePath = path.join(DATA_DIR, rel);
+        if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+          const ext = path.extname(filePath).toLowerCase();
+          const contentType = mimeTypes[ext] || 'application/octet-stream';
+          const fileData = fs.readFileSync(filePath);
+          return new Response(fileData, {
+            headers: {
+              'content-type': contentType,
+              'cache-control': 'public, max-age=31536000, immutable',
+            },
+          });
+        }
+        return new Response('File Not Found', { status: 404 });
+      }
+
+      // 9. Static frontend assets from FRONTEND_DIR
+      if (pathname === '/' || pathname === '' || pathname === '/index.html') {
+        const indexPath = path.join(FRONTEND_DIR, 'index.html');
+        if (fs.existsSync(indexPath)) {
+          const html = fs.readFileSync(indexPath, 'utf-8');
+          return new Response(html, {
+            headers: {
+              'content-type': 'text/html; charset=utf-8',
+              'cache-control': 'no-cache, no-store, must-revalidate',
+            },
+          });
+        }
+      }
+
+      const filePath = path.join(FRONTEND_DIR, pathname.startsWith('/') ? pathname.slice(1) : pathname);
+      if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+        const ext = path.extname(filePath).toLowerCase();
+        const contentType = mimeTypes[ext] || 'application/octet-stream';
+        const fileData = fs.readFileSync(filePath);
+        return new Response(fileData, {
+          headers: {
+            'content-type': contentType,
+            'cache-control': pathname.endsWith('.html') || pathname.endsWith('.js') || pathname.endsWith('.css')
+              ? 'no-cache, no-store, must-revalidate'
+              : 'public, max-age=86400',
+          },
+        });
+      }
+
+      return new Response('Not Found', { status: 404 });
+    } catch (err) {
+      log('[Protocol Error]', err);
+      return new Response(JSON.stringify({ detail: err.message || 'Internal Error', error: 'scan_failed' }), {
+        status: 500,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+  });
 }
 
 function createSplash() {
@@ -136,87 +445,6 @@ function createSplash() {
   splashWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(splashHtml));
 }
 
-function checkServerReady(url, timeoutMs = 25000, intervalMs = 200) {
-  const startTime = Date.now();
-  return new Promise((resolve) => {
-    let done = false;
-    const timer = setInterval(() => {
-      if (Date.now() - startTime > timeoutMs) {
-        clearInterval(timer);
-        if (!done) {
-          done = true;
-          resolve(false);
-        }
-        return;
-      }
-      const req = http.get(url, (res) => {
-        if (!done && res.statusCode < 500) {
-          done = true;
-          clearInterval(timer);
-          resolve(true);
-        }
-      });
-      req.on('error', () => {});
-      req.setTimeout(600, () => req.destroy());
-    }, intervalMs);
-  });
-}
-
-function startBackend() {
-  return new Promise((resolve) => {
-    let launched = false;
-    const launch = () => {
-      if (launched) return;
-      launched = true;
-      console.log('[AgriScan Desktop] Starting background FastAPI backend on port 8000...');
-      try {
-        const logPath = path.join(ROOT_DIR, 'backend.log');
-        let stdioOption = 'ignore';
-        try {
-          const logFd = fs.openSync(logPath, 'a');
-          stdioOption = ['ignore', logFd, logFd];
-        } catch (e) {
-          stdioOption = 'ignore';
-        }
-
-        backendProcess = spawn(
-          PYTHON_EXE,
-          ['-m', 'uvicorn', 'backend.main:app', '--host', '127.0.0.1', '--port', String(BACKEND_PORT)],
-          {
-            cwd: ROOT_DIR,
-            windowsHide: true,
-            shell: false,
-            stdio: stdioOption,
-            env: Object.assign({}, process.env, { PYTHONPATH: ROOT_DIR }),
-          }
-        );
-
-        backendProcess.on('error', (err) => {
-          console.error('[AgriScan Desktop] Failed to start backend:', err);
-        });
-      } catch (err) {
-        console.error('[AgriScan Desktop] Spawn error for backend:', err);
-      }
-
-      checkServerReady(APP_URL + '/api/health', 25000).then(() => {
-        console.log('[AgriScan Desktop] Backend is ready.');
-        resolve();
-      });
-    };
-
-    const probe = http.get(APP_URL + '/api/health', (res) => {
-      if (res.statusCode === 200) {
-        console.log('[AgriScan Desktop] Backend already active on port 8000.');
-        return resolve();
-      }
-      launch();
-    });
-
-    probe.setTimeout(1000, () => probe.destroy());
-    probe.on('error', () => launch());
-  });
-}
-
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1480,
@@ -236,7 +464,8 @@ function createWindow() {
     },
   });
 
-  mainWindow.loadURL(APP_URL);
+  // Zero-port local application loading
+  mainWindow.loadURL('app://agriscan/index.html');
 
   const showMainWindow = () => {
     if (splashWindow && !splashWindow.isDestroyed()) {
@@ -250,16 +479,7 @@ function createWindow() {
   };
 
   mainWindow.once('ready-to-show', showMainWindow);
-  setTimeout(showMainWindow, 3500);
-
-  mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
-    console.warn(`[AgriScan Desktop] Page failed to load (${errorCode}: ${errorDescription}), retrying in 1s...`);
-    setTimeout(() => {
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.loadURL(APP_URL);
-      }
-    }, 1000);
-  });
+  setTimeout(showMainWindow, 2500);
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('http://') || url.startsWith('https://')) {
@@ -274,6 +494,7 @@ function createWindow() {
   });
 }
 
+// Native PDF Export Dialog (Download Report)
 ipcMain.handle('save-report-pdf', async (event, { batchId }) => {
   if (!mainWindow || mainWindow.isDestroyed()) {
     return { success: false, error: 'Main window unavailable' };
@@ -319,15 +540,15 @@ ipcMain.handle('save-report-pdf', async (event, { batchId }) => {
 });
 
 function stopBackend() {
-  if (backendProcess) {
+  if (pythonProcess) {
     try {
-      if (process.platform === 'win32' && backendProcess.pid) {
-        exec(`taskkill /pid ${backendProcess.pid} /T /F`, () => {});
+      if (process.platform === 'win32' && pythonProcess.pid) {
+        exec(`taskkill /pid ${pythonProcess.pid} /T /F`, () => {});
       } else {
-        backendProcess.kill();
+        pythonProcess.kill();
       }
     } catch (e) {}
-    backendProcess = null;
+    pythonProcess = null;
   }
 }
 
@@ -336,8 +557,9 @@ app.whenReady().then(async () => {
     app.setAppUserModelId('com.agriscan.ricequalityanalyser');
   }
 
+  registerProtocolHandler();
   createSplash();
-  await startBackend();
+  startPythonWorker();
   createWindow();
 
   app.on('activate', () => {

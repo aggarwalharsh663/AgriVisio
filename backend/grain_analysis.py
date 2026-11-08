@@ -154,18 +154,25 @@ def feature_vector(measurement: dict, saturation: float) -> list[float]:
 
 
 def _split_touching_grains(
-    image_bgr: np.ndarray, foreground: np.ndarray
+    image_bgr: np.ndarray,
+    foreground: np.ndarray,
+    seed_spacing: int | None = None,
+    min_distance: float = 3.0,
+    min_area: int | None = None,
 ) -> list[np.ndarray]:
     """Split touching foreground grains using distance-transform watershed."""
     height, width = foreground.shape
     distance = cv2.distanceTransform(foreground, cv2.DIST_L2, 5)
-    seed_spacing = min(15, max(9, round(min(height, width) * 0.018)))
+    if seed_spacing is None:
+        seed_spacing = min(15, max(9, round(min(height, width) * 0.018)))
+    if min_area is None:
+        min_area = MIN_GRAIN_AREA
     seed_kernel = cv2.getStructuringElement(
         cv2.MORPH_ELLIPSE, (seed_spacing, seed_spacing)
     )
     local_maxima = (
         (distance >= cv2.dilate(distance, seed_kernel) - 1e-4)
-        & (distance >= 3)
+        & (distance >= min_distance)
         & (foreground > 0)
     ).astype(np.uint8)
     grouped_maxima = cv2.dilate(local_maxima, seed_kernel)
@@ -211,7 +218,7 @@ def _split_touching_grains(
         x0 = max(0, xs.start - 1)
         x1 = min(width, xs.stop + 1)
         sub_mask = (filtered_labels[y0:y1, x0:x1] == seed_label).astype(np.uint8) * 255
-        if cv2.countNonZero(sub_mask) < MIN_GRAIN_AREA:
+        if cv2.countNonZero(sub_mask) < min_area:
             continue
         found, _ = cv2.findContours(
             sub_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE, offset=(x0, y0)
@@ -232,35 +239,52 @@ def segment_grains(
 
     height, width = image_bgr.shape[:2]
     card_start = min(CARD_IGNORE_X, width) if ignore_calibration_card else width
-    gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
-    blurred = cv2.GaussianBlur(gray, BLUR_KERNEL_SIZE, 0)
-    otsu_threshold, _ = cv2.threshold(
-        blurred[:, :card_start], 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU
-    )
-    _, left_mask = cv2.threshold(
-        blurred[:, :card_start],
-        max(otsu_threshold, MIN_THRESHOLD_BRIGHTNESS),
-        255,
-        cv2.THRESH_BINARY,
-    )
-    mask = np.zeros((height, width), dtype=np.uint8)
-    mask[:, :card_start] = left_mask
-
     opening_kernel = cv2.getStructuringElement(
         cv2.MORPH_ELLIPSE, OPENING_KERNEL_SIZE
     )
-    opened = cv2.morphologyEx(mask, cv2.MORPH_OPEN, opening_kernel)
-    if split_touching:
-        # Suppress tray specular glare (bluish tray reflection vs warm grains)
-        b, _, r = cv2.split(image_bgr)
-        tray_glare = (
-            (b.astype(np.int16) - r.astype(np.int16) > 3)
-            & (r < 165)
-        )
-        opened[tray_glare] = 0
 
-        contours = _split_touching_grains(image_bgr, opened)
-        return sorted(contours, key=lambda contour: cv2.minAreaRect(contour)[0][0])
+    # Detect background type: Blue scanner tray vs dark/simulated tray
+    b_med = float(np.median(image_bgr[:, :, 0]))
+    r_med = float(np.median(image_bgr[:, :, 2]))
+    is_blue_tray = (b_med > r_med + 35)
+
+    if is_blue_tray:
+        # High contrast blue tray: rice grains have low (B - R)
+        b, _, r = cv2.split(image_bgr)
+        diff = b.astype(np.int16) - r.astype(np.int16)
+        mask = (diff < 95).astype(np.uint8) * 255
+        opened = cv2.morphologyEx(mask, cv2.MORPH_OPEN, opening_kernel)
+        if split_touching:
+            contours = _split_touching_grains(
+                image_bgr, opened, seed_spacing=5, min_distance=2.7, min_area=24
+            )
+            return sorted(contours, key=lambda contour: cv2.minAreaRect(contour)[0][0])
+    else:
+        gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
+        blurred = cv2.GaussianBlur(gray, BLUR_KERNEL_SIZE, 0)
+        otsu_threshold, _ = cv2.threshold(
+            blurred[:, :card_start], 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU
+        )
+        _, left_mask = cv2.threshold(
+            blurred[:, :card_start],
+            max(otsu_threshold, MIN_THRESHOLD_BRIGHTNESS),
+            255,
+            cv2.THRESH_BINARY,
+        )
+        mask = np.zeros((height, width), dtype=np.uint8)
+        mask[:, :card_start] = left_mask
+        opened = cv2.morphologyEx(mask, cv2.MORPH_OPEN, opening_kernel)
+        if split_touching:
+            # Suppress tray specular glare (bluish tray reflection vs warm grains)
+            b, _, r = cv2.split(image_bgr)
+            tray_glare = (
+                (b.astype(np.int16) - r.astype(np.int16) > 3)
+                & (r < 165)
+            )
+            opened[tray_glare] = 0
+
+            contours = _split_touching_grains(image_bgr, opened)
+            return sorted(contours, key=lambda contour: cv2.minAreaRect(contour)[0][0])
 
     component_count, component_labels, stats, _ = cv2.connectedComponentsWithStats(
         opened, connectivity=8
