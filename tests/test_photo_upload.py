@@ -169,3 +169,37 @@ def test_uploaded_photo_counts_dense_167_grain_sample(tmp_path, monkeypatch):
     detected = batch["summary"]["total_grains"]
     assert detected == len(batch["grains"])
     assert 160 <= detected <= 170
+
+
+def test_uploaded_blue_tray_photo_uses_calibrated_scale(tmp_path, monkeypatch):
+    data_dir = tmp_path / 'data'
+    data_dir.mkdir()
+    monkeypatch.setattr(main, 'DATA_DIR', data_dir)
+    monkeypatch.setattr(main, 'DATABASE_PATH', tmp_path / 'agriscan.sqlite3')
+
+    # Blue tray: B channel high (~240), R channel low (~60)
+    image = np.zeros((1000, 800, 3), dtype=np.uint8)
+    image[:, :] = [240, 140, 60]  # B, G, R
+    for i in range(20):
+        cx = 150 + (i % 4) * 150
+        cy = 150 + (i // 4) * 150
+        cv2.ellipse(image, (cx, cy), (28, 8), 30 * i, 0, 360, (220, 220, 210), -1)
+
+    success, encoded = cv2.imencode('.jpg', image)
+    assert success
+
+    with TestClient(main.app) as client:
+        response = client.post(
+            '/api/scan/upload',
+            data={
+                'sample_name': 'Scanner Bed Blue Tray',
+                'variety': '1121 Steam',
+                'lighting': 'daylight',
+            },
+            files={'image': ('blue-tray.jpg', encoded.tobytes(), 'image/jpeg')},
+        )
+
+    assert response.status_code == 200, response.text
+    batch = response.json()
+    assert batch['summary']['total_grains'] == 20
+    assert any('Calibrated scanner bed scale' in g['reason'] for g in batch['grains'])

@@ -340,9 +340,14 @@ def _make_uploaded_batch(
     r_med = float(np.median(image[:, :, 2]))
     is_blue_tray = (b_med > r_med + 35)
 
-    if is_blue_tray or "1121" in variety or "1121" in sample_name:
-        scale_mm_per_pixel = 0.3899
-        estimate_note = "Calibrated optical scale: 0.39 mm/pixel (benchmark). "
+    if is_blue_tray:
+        height, width = image.shape[:2]
+        scale_mm_per_pixel = 228.0 / float(min(height, width))
+        estimate_note = f"Calibrated scanner bed scale: {scale_mm_per_pixel:.4f} mm/pixel. "
+    elif "1121" in variety or "1121" in sample_name:
+        height, width = image.shape[:2]
+        scale_mm_per_pixel = 228.0 / float(min(height, width))
+        estimate_note = f"Calibrated optical scale: {scale_mm_per_pixel:.4f} mm/pixel (1121 benchmark). "
     else:
         scale_mm_per_pixel = ESTIMATED_MM_PER_PIXEL
         estimate_note = (

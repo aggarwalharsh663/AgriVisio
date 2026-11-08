@@ -253,10 +253,19 @@ def segment_grains(
         b, _, r = cv2.split(image_bgr)
         diff = b.astype(np.int16) - r.astype(np.int16)
         mask = (diff < 95).astype(np.uint8) * 255
-        opened = cv2.morphologyEx(mask, cv2.MORPH_OPEN, opening_kernel)
+        k_size = max(3, (round(7 * min(height, width) / 2442) // 2) * 2 + 1)
+        opened = cv2.morphologyEx(
+            mask,
+            cv2.MORPH_OPEN,
+            cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k_size, k_size)),
+        )
         if split_touching:
+            scale_factor = min(height, width) / 2442.0
+            sp = max(5, round(23 * scale_factor))
+            min_d = max(2.5, 9.5 * scale_factor)
+            min_a = max(20, round(200 * (scale_factor ** 2)))
             contours = _split_touching_grains(
-                image_bgr, opened, seed_spacing=5, min_distance=2.7, min_area=24
+                image_bgr, opened, seed_spacing=sp, min_distance=min_d, min_area=min_a
             )
             return sorted(contours, key=lambda contour: cv2.minAreaRect(contour)[0][0])
     else:
