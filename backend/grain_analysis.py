@@ -461,7 +461,7 @@ def _analyze_image(
             if is_blue_tray:
                 # Broken threshold matches Micron Analyzer (broken / short fragments)
                 broken_threshold = 5.81 if batch_median < 7.8 else 2.50
-                chalk_threshold = 0.85 if batch_median < 5.0 else (0.65 if batch_median < 7.8 else 0.69)
+                chalk_threshold = 0.85 if batch_median < 5.0 else (0.69 if batch_median < 7.8 else 0.69)
                 discolor_threshold = 157.0 if batch_median < 5.0 else 152.0
                 if np.mean(measurement["mean_rgb"]) < discolor_threshold:
                     label = "discolored"
@@ -469,17 +469,17 @@ def _analyze_image(
                     reason_text = (
                         f"Darker discolored kernel (mean RGB {np.mean(measurement['mean_rgb']):.1f} < {discolor_threshold})."
                     )
-                elif measurement["length_mm"] < broken_threshold:
-                    label = "broken"
-                    confidence = 0.95
-                    reason_text = (
-                        f"Grain length {measurement['length_mm']:.2f} mm is below whole-grain threshold."
-                    )
                 elif measurement["chalk_fraction"] >= chalk_threshold:
                     label = "chalky"
                     confidence = 0.92
                     reason_text = (
                         f"High opacity / chalky fraction ({measurement['chalk_fraction']*100:.1f}% >= 65%)."
+                    )
+                elif measurement["length_mm"] < broken_threshold:
+                    label = "broken"
+                    confidence = 0.95
+                    reason_text = (
+                        f"Grain length {measurement['length_mm']:.2f} mm is below whole-grain threshold."
                     )
                 else:
                     label = "good"
