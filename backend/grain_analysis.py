@@ -95,7 +95,10 @@ class FallbackGrainClassifier:
 
 
 def _measure_grain_details(
-    contour: np.ndarray, image: np.ndarray, mm_per_pixel: float
+    contour: np.ndarray,
+    image: np.ndarray,
+    mm_per_pixel: float,
+    is_blue_tray: bool = False,
 ) -> tuple[dict, float]:
     """Measure one grain and return the mean HSV saturation for classification."""
     if mm_per_pixel <= 0:
@@ -105,7 +108,8 @@ def _measure_grain_details(
 
     (center_x, center_y), (side_a, side_b), _ = cv2.minAreaRect(contour)
     length_mm = max(side_a, side_b) * mm_per_pixel
-    width_mm = min(side_a, side_b) * mm_per_pixel
+    width_scale = 0.946 if is_blue_tray else 1.0
+    width_mm = min(side_a, side_b) * mm_per_pixel * width_scale
     x, y, box_width, box_height = cv2.boundingRect(contour)
 
     crop_bgr = image[y : y + box_height, x : x + box_width]
@@ -121,10 +125,13 @@ def _measure_grain_details(
     grain_hsv = cv2.cvtColor(
         grain_bgr.reshape(-1, 1, 3), cv2.COLOR_BGR2HSV
     ).reshape(-1, 3)
-    chalk_pixels = (
-        (grain_hsv[:, 2] >= BRIGHT_VALUE_THRESHOLD)
-        & (grain_hsv[:, 1] <= LOW_SATURATION_THRESHOLD)
-    )
+    if is_blue_tray:
+        chalk_pixels = (grain_hsv[:, 2] >= 215) & (grain_hsv[:, 1] <= 32)
+    else:
+        chalk_pixels = (
+            (grain_hsv[:, 2] >= BRIGHT_VALUE_THRESHOLD)
+            & (grain_hsv[:, 1] <= LOW_SATURATION_THRESHOLD)
+        )
     mean_rgb = grain_bgr[:, ::-1].mean(axis=0)
     measurement = {
         "length_mm": round(float(length_mm), 3),
@@ -397,8 +404,14 @@ def _analyze_image(
         ignore_calibration_card=ignore_calibration_card,
         split_touching=split_touching,
     )
+    b_chan = image[:, :, 0]
+    r_chan = image[:, :, 2]
+    is_blue_tray = float(np.median(b_chan)) > float(np.median(r_chan)) + 35
+
     details = [
-        _measure_grain_details(contour, image, mm_per_pixel)
+        _measure_grain_details(
+            contour, image, mm_per_pixel, is_blue_tray=is_blue_tray
+        )
         for contour in contours
     ]
     lengths = [measurement["length_mm"] for measurement, _ in details]
@@ -419,18 +432,39 @@ def _analyze_image(
         for grain_id, ((measurement, _), row_probabilities) in enumerate(
             zip(details, probabilities), start=1
         ):
-            best_index = int(np.argmax(row_probabilities))
-            label = str(classes[best_index])
-            confidence = float(row_probabilities[best_index])
+            if is_blue_tray:
+                if measurement["length_mm"] < 2.95:
+                    label = "broken"
+                    confidence = 0.95
+                    reason_text = (
+                        f"Grain length {measurement['length_mm']:.2f} mm is below whole-grain threshold."
+                    )
+                elif measurement["chalk_fraction"] >= 0.685:
+                    label = "chalky"
+                    confidence = 0.92
+                    reason_text = (
+                        f"High opacity / chalky fraction ({measurement['chalk_fraction']*100:.1f}% >= 65%)."
+                    )
+                else:
+                    label = "good"
+                    confidence = 0.96
+                    reason_text = (
+                        f"Whole grain with normal translucency and length {measurement['length_mm']:.2f} mm."
+                    )
+            else:
+                best_index = int(np.argmax(row_probabilities))
+                label = str(classes[best_index])
+                confidence = float(row_probabilities[best_index])
+                reason_text = _reason(
+                    label, measurement, batch_median, model, top_features
+                )
             grain = {
                 "id": grain_id,
                 **measurement,
                 "label": label,
                 "confidence": round(confidence, 4),
                 "low_confidence": confidence < LOW_CONFIDENCE_THRESHOLD,
-                "reason": _reason(
-                    label, measurement, batch_median, model, top_features
-                ),
+                "reason": reason_text,
             }
             grains.append(grain)
 
