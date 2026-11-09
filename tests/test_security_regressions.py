@@ -357,8 +357,8 @@ def test_bootstrap_secret_exchange_and_anti_replay(unauth_client):
     res = unauth_client.post("/api/auth/bootstrap", json={"bootstrap_secret": secret})
     assert res.status_code == 200
     data = res.json()
-    assert data.get("status") == "authenticated"
-    assert "token" in data
+    assert data == {"status": "authenticated"}
+    assert "token" not in data
 
     # Verify session cookie was set with HttpOnly
     cookie = res.cookies.get("agriscan_session")
@@ -549,3 +549,111 @@ def test_ipc_worker_mock_mode_consistency(monkeypatch):
     with pytest.raises(HTTPException) as excinfo:
         handle_scan({"lighting": "ring_light", "n_grains": 10, "seed": 42, "sample_name": "Test", "variety": "IR64"})
     assert excinfo.value.status_code == 403
+
+
+# --- Second Re-Audit Remediations: S-01, S-02, Additional 1-3 ---
+
+def test_s01_static_requests_never_issue_session_cookie(unauth_client):
+    """GET /, /index.html, /app.js, /style.css must NEVER issue an authentication cookie (S-01)."""
+    for endpoint in ["/", "/index.html", "/app.js", "/style.css"]:
+        res = unauth_client.get(endpoint)
+        set_cookie = res.headers.get("set-cookie", "")
+        assert "agriscan_session" not in set_cookie, f"Endpoint {endpoint} illegally issued agriscan_session cookie!"
+        assert "agriscan_session" not in res.cookies, f"Endpoint {endpoint} set agriscan_session in client cookies!"
+
+
+def test_s01_cookie_only_auth_fails_without_prior_bootstrap(unauth_client):
+    """Protected endpoints and /files must strictly return 401 without prior successful bootstrap."""
+    assert unauth_client.get("/api/batches").status_code == 401
+    assert unauth_client.post("/api/scan", json={"lighting": "ring_light", "n_grains": 10, "sample_name": "T", "variety": "V"}).status_code == 401
+    assert unauth_client.get("/files/batches/AS-20261018-001/batch.json").status_code == 401
+
+
+def test_s01_bootstrap_session_allows_api_access_without_leaking_token(unauth_client):
+    """Valid bootstrap establishes session cookie and enables protected access without leaking token."""
+    secret = backend_main.create_one_time_bootstrap_secret(ttl=30.0)
+    res_boot = unauth_client.post("/api/auth/bootstrap", json={"bootstrap_secret": secret})
+    assert res_boot.status_code == 200
+    assert res_boot.json() == {"status": "authenticated"}
+    assert "token" not in res_boot.json()
+
+    # Now the client has the agriscan_session cookie; protected access must succeed
+    res_batches = unauth_client.get("/api/batches")
+    assert res_batches.status_code == 200
+
+
+def test_s02_ipc_worker_bootstrap_flow():
+    """Ensure ipc_worker handles register_bootstrap and bootstrap actions over stdio."""
+    from backend.ipc_worker import handle_register_bootstrap, handle_bootstrap
+
+    test_secret = "a1b2c3d4e5f60718293a4b5c6d7e8f90"
+    reg_res = handle_register_bootstrap({"secret": test_secret})
+    assert reg_res == {"status": "registered"}
+
+    # Exchange once over IPC
+    boot_res = handle_bootstrap({"secret": test_secret})
+    assert boot_res.get("status") == "authenticated"
+    assert "session_token" in boot_res
+
+    # Replay over IPC must fail
+    with pytest.raises(ValueError):
+        handle_bootstrap({"secret": test_secret})
+
+
+def test_additional_1_installer_excludes_env_and_keys(tmp_path):
+    """Ensure build_installer excludes .env and private keys but preserves .env.example."""
+    from scripts.build_installer import is_excluded_path, scan_file_for_secrets
+
+    assert is_excluded_path(Path(".env")) is True
+    assert is_excluded_path(Path(".env.local")) is True
+    assert is_excluded_path(Path(".env.production")) is True
+    assert is_excluded_path(Path("secret.key")) is True
+    assert is_excluded_path(Path("server.pem")) is True
+    assert is_excluded_path(Path(".env.example")) is False
+    assert is_excluded_path(Path(".env.sample")) is False
+
+    # Test secret scanning
+    bad_key_file = tmp_path / "test.txt"
+    bad_key_file.write_text("-----BEGIN RSA PRIVATE KEY-----\nMIIE...", encoding="utf-8")
+    with pytest.raises(ValueError):
+        scan_file_for_secrets(bad_key_file)
+
+
+def test_additional_2_backend_files_scope_tightened(auth_client, tmp_path, monkeypatch):
+    """Backend /files must reject arbitrary 2-segment paths outside approved batch roots."""
+    data_dir = tmp_path / "data"
+    batches_dir = data_dir / "batches" / "AS-20261109-999"
+    batches_dir.mkdir(parents=True)
+    valid_file = batches_dir / "batch.json"
+    valid_file.write_text("{}", encoding="utf-8")
+
+    # Put a file in an unscoped arbitrary 2-segment directory
+    unscoped_dir = data_dir / "arbitrary"
+    unscoped_dir.mkdir()
+    unscoped_file = unscoped_dir / "data.json"
+    unscoped_file.write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr(backend_main, "DATA_DIR", data_dir)
+
+    # Valid batch-scoped request succeeds
+    res_valid = auth_client.get("/files/batches/AS-20261109-999/batch.json")
+    assert res_valid.status_code == 200
+
+    # Arbitrary unscoped 2-segment request must be rejected with 403
+    res_unscoped = auth_client.get("/files/arbitrary/data.json")
+    assert res_unscoped.status_code == 403
+
+
+def test_additional_3_expired_and_consumed_bootstrap_secrets_purged():
+    """Ensure expired and consumed secrets are purged from in-memory dictionary."""
+    sec1 = backend_main.create_one_time_bootstrap_secret(ttl=0.001)
+    import time
+    time.sleep(0.01)
+    # Registration of a new secret purges expired entries
+    sec2 = backend_main.create_one_time_bootstrap_secret(ttl=30.0)
+    assert sec1 not in backend_main._bootstrap_secrets
+    assert sec2 in backend_main._bootstrap_secrets
+
+    # Consuming sec2 removes it atomically
+    assert backend_main.consume_bootstrap_secret(sec2) is True
+    assert sec2 not in backend_main._bootstrap_secrets

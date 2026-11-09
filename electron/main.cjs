@@ -183,6 +183,26 @@ function sendIpcRequest(action, data = {}, timeoutMs = 60000) {
   });
 }
 
+let currentSessionToken = null;
+
+async function performElectronBootstrap() {
+  const secret = crypto.randomBytes(32).toString('hex');
+  try {
+    log('Registering startup bootstrap secret via portless IPC...');
+    await sendIpcRequest('register_bootstrap', { secret });
+    log('Performing bootstrap exchange via portless IPC...');
+    const result = await sendIpcRequest('bootstrap', { secret });
+    if (result && result.session_token) {
+      currentSessionToken = result.session_token;
+      log('Bootstrap authenticated successfully. Local session established.');
+      return true;
+    }
+  } catch (err) {
+    log('Bootstrap authentication failed:', err.message);
+  }
+  return false;
+}
+
 // --- MIME types for file serving ---
 const mimeTypes = {
   '.html': 'text/html; charset=utf-8',
@@ -308,6 +328,40 @@ function registerProtocolHandler() {
         const result = await sendIpcRequest('health', {});
         return new Response(JSON.stringify(result), {
           headers: { 'content-type': 'application/json' },
+        });
+      }
+
+      // 1b. API: /api/auth/bootstrap (S-02)
+      if (pathname === '/api/auth/bootstrap' && req.method === 'POST') {
+        const body = await req.json().catch(() => ({}));
+        const secret = (body.bootstrap_secret || '').trim();
+        try {
+          const result = await sendIpcRequest('bootstrap', { secret });
+          if (result && result.session_token) {
+            currentSessionToken = result.session_token;
+            return new Response(JSON.stringify({ status: 'authenticated' }), {
+              headers: {
+                'content-type': 'application/json',
+                'set-cookie': `agriscan_session=${result.session_token}; HttpOnly; SameSite=Lax; Path=/`,
+              },
+            });
+          }
+        } catch (err) {
+          return new Response(JSON.stringify({ detail: 'Invalid, expired, or previously consumed bootstrap secret.' }), {
+            status: 401,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+      }
+
+      // 1c. API: /api/auth/logout (S-02)
+      if (pathname === '/api/auth/logout' && req.method === 'POST') {
+        currentSessionToken = null;
+        return new Response(JSON.stringify({ status: 'logged_out' }), {
+          headers: {
+            'content-type': 'application/json',
+            'set-cookie': 'agriscan_session=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; SameSite=Lax',
+          },
         });
       }
 
@@ -439,8 +493,11 @@ function registerProtocolHandler() {
         });
       }
 
-      // 8. Static uploaded media & batch files (/files/...) - hardened with extension whitelist and batch scoping
+      // 8. Static uploaded media & batch files (/files/...) - hardened with auth, extension whitelist and batch scoping
       if (pathname.startsWith('/files/')) {
+        if (!currentSessionToken) {
+          return new Response('Unauthorized', { status: 401 });
+        }
         const rawRel = pathname.slice('/files/'.length);
         const normRel = rawRel.replace(/^[\/\\]+/, '');
         // Require batch directory scoping (batches/<batch_id>/... or AS-.../...)
@@ -787,6 +844,18 @@ app.whenReady().then(async () => {
   registerProtocolHandler();
   createSplash();
   startPythonWorker();
+
+  const authSuccess = await performElectronBootstrap();
+  if (!authSuccess) {
+    log('FATAL: Could not establish authenticated session. Aborting launch.');
+    dialog.showErrorBox(
+      'Authentication Failure',
+      'AgriScan could not establish an authenticated local session with the optical engine.\n\nPlease restart the application.'
+    );
+    app.quit();
+    return;
+  }
+
   createWindow();
 
   app.on('activate', () => {

@@ -24,6 +24,9 @@ from backend.main import (
     batches,
     get_batch,
     is_mock_mode_enabled,
+    register_bootstrap_secret,
+    consume_bootstrap_secret,
+    get_or_create_api_token,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -179,6 +182,24 @@ def handle_get_batch(data: dict) -> dict:
     return get_batch(batch_id)
 
 
+def handle_register_bootstrap(data: dict) -> dict:
+    """Register a one-time bootstrap secret passed securely over stdio (S-02)."""
+    secret = data.get("secret", "").strip()
+    if not secret or len(secret) < 16:
+        raise ValueError("Invalid bootstrap secret format.")
+    register_bootstrap_secret(secret)
+    return {"status": "registered"}
+
+
+def handle_bootstrap(data: dict) -> dict:
+    """Validate bootstrap secret and issue internal session token over stdio (S-02)."""
+    secret = data.get("secret", "").strip()
+    if not secret or not consume_bootstrap_secret(secret):
+        raise ValueError("Invalid, expired, or previously consumed bootstrap secret.")
+    token = get_or_create_api_token()
+    return {"status": "authenticated", "session_token": token}
+
+
 def handle_shutdown(data: dict) -> dict:
     """Handle graceful shutdown requested by Electron parent process (R-06)."""
     LOGGER.info("Graceful shutdown signal received from Electron parent.")
@@ -188,6 +209,8 @@ def handle_shutdown(data: dict) -> dict:
 HANDLERS = {
     "health": handle_health,
     "heartbeat": handle_heartbeat,
+    "register_bootstrap": handle_register_bootstrap,
+    "bootstrap": handle_bootstrap,
     "scan": handle_scan,
     "scan_upload": handle_scan_upload,
     "scan_hardware": handle_scan_hardware,

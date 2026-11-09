@@ -25,7 +25,23 @@ namespace AgriScanSetup
 
         // Configurable expected SHA-256 checksum for agriscan_payload.zip
         // If empty or null, integrity verification uses embedded manifest or validates stream readable
-        public static string ExpectedPayloadSha256 = "14DEB62DD0EAED924D6B4DF65033154EED0149C1176814DDCB656EF833096D88";
+        public static string ExpectedPayloadSha256 = "2DD7E1E3F50EDC50900E09287E1B9BAF16F56D9CDEEF123630EFDCA15329D8D2";
+
+                /// <summary>
+        /// Constant-time comparison of two hex hash strings to prevent timing side-channels (S-03).
+        /// Accumulates differences across all characters without early exit.
+        /// </summary>
+        public static bool FixedTimeHexEquals(string a, string b)
+        {
+            if (a == null || b == null || a.Length != b.Length)
+                return false;
+            int diff = 0;
+            for (int i = 0; i < a.Length; i++)
+            {
+                diff |= char.ToUpperInvariant(a[i]) ^ char.ToUpperInvariant(b[i]);
+            }
+            return diff == 0;
+        }
 
         public SetupForm()
         {
@@ -350,7 +366,7 @@ namespace AgriScanSetup
                             );
                         }
 
-                        if (!string.Equals(computedHash, ExpectedPayloadSha256.Trim(), StringComparison.OrdinalIgnoreCase))
+                        if (!FixedTimeHexEquals(computedHash, ExpectedPayloadSha256.Trim()))
                         {
                             throw new SecurityException(string.Format(
                                 "Security Alert: Payload integrity mismatch detected!\nExpected SHA-256: {0}\nComputed SHA-256: {1}\nThe installer package may be corrupted or tampered with. Installation aborted.",

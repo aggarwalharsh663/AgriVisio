@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import re
 import secrets
 import threading
 import time
@@ -50,20 +51,32 @@ UPLOAD_MAX_PIXELS = 20_000_000            # 20 Megapixel limit
 ESTIMATED_MM_PER_PIXEL = 0.12
 
 
-# Bootstrap Secret Management (R-02)
+# Bootstrap Secret Management (R-02 / S-01 / S-02)
 _bootstrap_lock = threading.Lock()
 _bootstrap_secrets: dict[str, dict[str, Any]] = {}
 BOOTSTRAP_SECRET_TTL = 30.0  # 30 seconds expiration
 
 
+def _purge_expired_secrets_locked(now: float | None = None) -> None:
+    """Purge expired and consumed secrets from in-memory store (Additional 3)."""
+    current = now if now is not None else time.time()
+    stale_keys = [
+        k for k, rec in _bootstrap_secrets.items()
+        if rec.get("consumed") or (current - rec.get("created_at", 0) > rec.get("ttl", BOOTSTRAP_SECRET_TTL))
+    ]
+    for k in stale_keys:
+        del _bootstrap_secrets[k]
+
+
 def register_bootstrap_secret(secret: str, ttl: float = BOOTSTRAP_SECRET_TTL) -> None:
-    """Register a one-time single-use bootstrap secret."""
-    if not secret:
+    """Register a one-time single-use bootstrap secret with bounded lifecycle."""
+    if not secret or not isinstance(secret, str):
         return
     with _bootstrap_lock:
-        _bootstrap_secrets[secret] = {
+        _purge_expired_secrets_locked()
+        _bootstrap_secrets[secret.strip()] = {
             "created_at": time.time(),
-            "ttl": ttl,
+            "ttl": float(ttl),
             "consumed": False,
         }
 
@@ -76,20 +89,24 @@ def create_one_time_bootstrap_secret(ttl: float = BOOTSTRAP_SECRET_TTL) -> str:
 
 
 def consume_bootstrap_secret(secret: str) -> bool:
-    """Validate and immediately consume a one-time bootstrap secret."""
+    """Validate and atomically consume a one-time bootstrap secret (S-01 / Additional 3)."""
     if not secret or not isinstance(secret, str):
         return False
     now = time.time()
     with _bootstrap_lock:
-        record = _bootstrap_secrets.get(secret)
+        _purge_expired_secrets_locked(now)
+        clean_secret = secret.strip()
+        record = _bootstrap_secrets.get(clean_secret)
         if not record:
             return False
-        if record["consumed"]:
+        if record.get("consumed"):
             return False
-        if now - record["created_at"] > record["ttl"]:
-            del _bootstrap_secrets[secret]
+        if now - record.get("created_at", 0) > record.get("ttl", BOOTSTRAP_SECRET_TTL):
+            del _bootstrap_secrets[clean_secret]
             return False
+        # Atomically consume and purge to prevent any replay
         record["consumed"] = True
+        del _bootstrap_secrets[clean_secret]
         return True
 
 
@@ -687,20 +704,7 @@ async def add_security_and_session_headers(request: Request, call_next):
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"
-        # Set session cookie on browser view from local loopback
-        if request.client and request.client.host in ("127.0.0.1", "localhost", "::1", "testclient"):
-            if "agriscan_session" not in request.cookies:
-                token = get_or_create_api_token()
-                is_secure = request.url.scheme == "https"
-                response.set_cookie(
-                    key="agriscan_session",
-                    value=token,
-                    httponly=True,
-                    samesite="lax",
-                    secure=is_secure,
-                    path="/",
-                    max_age=86400,
-                )
+        # S-01: Static resource requests must NEVER issue authentication cookies or grant sessions.
     return response
 
 
@@ -742,7 +746,8 @@ def exchange_bootstrap_secret(req: BootstrapRequest, request: Request, response:
         path="/",
         max_age=86400,
     )
-    return {"status": "authenticated", "token": token}
+    # S-01 / S-02: Never disclose the master token in HTTP response bodies
+    return {"status": "authenticated"}
 
 
 @app.post("/api/auth/logout")
@@ -997,12 +1002,23 @@ class ProtectedDataFilesApp(StaticFiles):
         if lower.endswith(self.BLOCKED_EXTENSIONS):
             return Response("Access Denied", status_code=403)
 
-        # 3. Narrow scoping: only allow valid batch files (.jpg, .jpeg, .png, .webp, .json)
+        # 3. Narrow scoping (Additional 2): only allow valid batch files (.jpg, .jpeg, .png, .webp, .json)
         if not lower.endswith(self.ALLOWED_EXTENSIONS):
             return Response("Not Found", status_code=404)
 
-        if len(norm_parts) < 2:
-            return Response("Not Found", status_code=404)
+        # Enforce strict batch directory scope: batches/<valid-batch-id>/... or legacy AS-.../...
+        is_scoped = False
+        if norm_parts[0] == "batches" and len(norm_parts) >= 3:
+            batch_id = norm_parts[1]
+            if re.match(r"^[\w-]+$", batch_id):
+                is_scoped = True
+        elif norm_parts[0].startswith("AS-") and len(norm_parts) >= 2:
+            batch_id = norm_parts[0]
+            if re.match(r"^AS-[\w-]+$", batch_id):
+                is_scoped = True
+
+        if not is_scoped:
+            return Response("Access Denied: Unscoped batch file access", status_code=403)
 
         # 4. Containment and symlink escape verification
         base_dir = Path(self.directory).resolve()

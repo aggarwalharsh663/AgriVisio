@@ -32,6 +32,46 @@ EXCLUDE_PATTERNS = [
     "electron.log",
 ]
 
+# Sensitive patterns that must NEVER be packaged into the installer payload (Additional 1)
+EXCLUDE_FILENAME_PATTERNS = [
+    r"^\.env(\..+)?$",  # Matches .env, .env.local, .env.development, .env.production, .env.test, .env.*.local
+    r".*\.(key|pem|pkcs12|pfx|cert|token)$",
+    r"^\.auth_token$",
+    r"^id_rsa.*$",
+]
+
+
+def is_excluded_path(rel_path: Path) -> bool:
+    rel_str = str(rel_path).replace("\\", "/")
+    filename = rel_path.name
+
+    # Explicitly permit legitimate sample/template configuration files
+    if filename in (".env.example", ".env.sample", ".env.template"):
+        return False
+
+    # Check directory and substring patterns
+    if any(exc in rel_str for exc in EXCLUDE_PATTERNS):
+        return True
+
+    # Check sensitive filename patterns
+    for pat in EXCLUDE_FILENAME_PATTERNS:
+        if re.search(pat, filename, re.IGNORECASE):
+            return True
+
+    return False
+
+
+def scan_file_for_secrets(file_path: Path) -> None:
+    """Build-time safeguard to detect potential credentials in payload files."""
+    if file_path.suffix.lower() in (".jpg", ".jpeg", ".png", ".ico", ".joblib", ".exe", ".dll", ".zip"):
+        return
+    try:
+        content = file_path.read_text(encoding="utf-8", errors="ignore")
+    except Exception:
+        return
+    if "-----BEGIN PRIVATE KEY-----" in content or "-----BEGIN RSA PRIVATE KEY-----" in content:
+        raise ValueError(f"Build halted: Detected private key in payload file: {file_path}")
+
 
 def compute_sha256(file_path: Path) -> str:
     hasher = hashlib.sha256()
@@ -70,8 +110,9 @@ def build_installer(output_exe: Path | None = None) -> Path:
                     if item.is_file():
                         rel = item.relative_to(ROOT_DIR)
                         rel_str = str(rel).replace("\\", "/")
-                        if any(exc in rel_str for exc in EXCLUDE_PATTERNS):
+                        if is_excluded_path(rel):
                             continue
+                        scan_file_for_secrets(item)
                         zf.write(item, arcname=str(rel))
 
         payload_size_mb = tmp_payload.stat().st_size / (1024 * 1024)

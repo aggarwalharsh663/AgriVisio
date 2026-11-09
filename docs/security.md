@@ -10,7 +10,7 @@ AgriScan is an optical grain assessment desktop and API application. This docume
 
 ### Core Authentication Channels
 1. **Desktop Portless IPC (Primary Desktop Path)**:
-   - When running as an Electron desktop application, AgriScan does not bind to public network interfaces.
+   - When running as an Electron desktop application, AgriScan does not expose loopback network ports for internal communication.
    - Electron communicates with the Python computer vision engine (`backend/ipc_worker.py`) using standard input and output pipes (`stdio`), bypassing the network stack entirely.
 2. **Local HTTP API & Web Interface**:
    - FastAPI binds strictly to `127.0.0.1` (loopback).
@@ -21,15 +21,21 @@ AgriScan is an optical grain assessment desktop and API application. This docume
      - Cookie: `agriscan_session=<token>`
    - **Query-token authentication (`?token=...`) is strictly removed and prohibited** to prevent secret leakage in access logs, proxy logs, and browser navigation histories.
 
-### Secure Single-Use Bootstrap Protocol (R-02)
-To eliminate unauthorized loopback credential discovery (formerly `GET /api/auth/token`):
-1. A 32-byte cryptographic bootstrap secret is generated (via `secrets.token_hex(32)`) or passed via secure process environment (`AGRISCAN_BOOTSTRAP_SECRET`).
-2. The client presents the bootstrap secret via `POST /api/auth/bootstrap`.
-3. The server validates the secret against an in-memory registry:
-   - Secret must be unexpired (30-second TTL).
-   - Secret must be unconsumed.
-   - Upon successful verification, the secret is immediately marked as consumed and deleted, preventing replay attacks.
-4. The server issues an authenticated session response setting an `HttpOnly` session cookie.
+### Secure Single-Use Bootstrap Protocol (R-02 / S-01 / S-02)
+To prevent unauthorized loopback processes from discovering or extracting API credentials:
+1. **Generation**: The Electron main process generates a cryptographically secure 32-byte hexadecimal secret at startup using `crypto.randomBytes(32).toString('hex')`.
+2. **Registration**: Electron delivers the secret to the Python backend over the protected, portless `stdio` IPC pipe via a `register_bootstrap` message.
+3. **Storage & Expiration**: The backend registers the secret in memory with a 30-second TTL (`BOOTSTRAP_SECRET_TTL = 30.0`). Expired and consumed entries are purged automatically during registration and validation cycles.
+4. **Exchange**: Electron performs the bootstrap exchange over IPC (`bootstrap`) or via `POST /api/auth/bootstrap`. The backend validates the secret:
+   - Secret must match an active in-memory record.
+   - Secret must be unexpired.
+   - Secret must not have been previously consumed.
+   - Secret is consumed atomically and immediately deleted to prevent replay attacks.
+5. **Session Issuance & Token Secrecy**:
+   - The session is established by issuing an `HttpOnly` cookie (`agriscan_session`).
+   - The HTTP response body contains **only** `{"status": "authenticated"}`. The master API token is **never** disclosed in the HTTP response body or exposed to renderer JavaScript.
+6. **No Free Sessions on Static Resources (S-01)**:
+   - Static asset delivery (`/`, `/index.html`, `/app.js`, `/style.css`) does not issue cookies or grant authenticated sessions. An unauthenticated visitor receives static assets but cannot invoke protected APIs or download batch inspection records.
 
 ### Cookie Security Policy
 - `HttpOnly: True` — Inaccessible to JavaScript and DOM environments (`document.cookie`), mitigating XSS session theft.
@@ -41,16 +47,18 @@ To eliminate unauthorized loopback credential discovery (formerly `GET /api/auth
 
 ---
 
-## 2. File-Serving Security (`/files`) (R-01)
+## 2. File-Serving Security (`/files`) (R-01 / Additional 2)
 
 ### Access Control
 - Unrestricted directory exposure has been eliminated.
-- All requests under `/files/...` strictly enforce authentication via `verify_api_token`.
-- Unauthenticated requests return `HTTP 401 Unauthorized`.
+- All requests under `/files/...` strictly enforce authentication via `verify_api_token` (returning `HTTP 401 Unauthorized` for unauthenticated callers).
 
 ### Narrowly Scoped Containment
-- Requests must correspond to legitimate batch artifacts.
-- Permitted extensions are restricted to: `[".jpg", ".jpeg", ".png", ".webp", ".json"]`.
+- Requests must match approved batch directory roots:
+  - `batches/<valid-batch-id>/<filename>`
+  - Legacy `AS-.../<filename>`
+  - Batch identifiers must match alphanumeric/standard batch naming formats (`^[\w-]+$`). Unscoped paths outside batch roots return `HTTP 403 Forbidden`.
+- Permitted extensions are strictly restricted to: `[".jpg", ".jpeg", ".png", ".webp", ".json"]`.
 - The following sensitive extensions are unconditionally rejected with `HTTP 403 Forbidden`:
   `[".sqlite3", ".db", ".auth_token", ".py", ".pyc", ".joblib", ".env", ".key", ".pem", ".log", ".bat", ".cmd", ".ps1", ".sh", ".webm", ".mp4", ".exe", ".dll", ".ini"]`.
 - Traversal sequences (`..`), percent-encoded equivalents (`%2e%2e`), Windows path separators (`\`), and null bytes (`%00`) are blocked before filesystem resolution.
@@ -58,21 +66,14 @@ To eliminate unauthorized loopback credential discovery (formerly `GET /api/auth
 
 ---
 
-## 3. Electron Desktop Hardening (R-06)
+## 3. Electron Desktop Hardening (R-06 / S-02)
 
-### Content Security Policy (CSP)
-Electron registers the custom `app://` protocol without `bypassCSP: true`. All served pages enforce the following policy:
+### Content Security Policy (CSP) Coverage
+- HTML documents served through the custom `app://` scheme explicitly enforce a Content Security Policy header:
 ```
-default-src 'self' app:;
-script-src 'self' app:;
-style-src 'self' 'unsafe-inline' app: https://fonts.googleapis.com;
-font-src 'self' app: https://fonts.gstatic.com data:;
-img-src 'self' app: data: blob:;
-connect-src 'self' app: http://127.0.0.1:* http://localhost:*;
-object-src 'none';
-base-uri 'self' app:;
-frame-ancestors 'none';
+default-src 'self' app:; script-src 'self' app:; style-src 'self' 'unsafe-inline' app: https://fonts.googleapis.com; font-src 'self' app: https://fonts.gstatic.com data:; img-src 'self' app: data: blob:; connect-src 'self' app: http://127.0.0.1:* http://localhost:*; object-src 'none'; base-uri 'self' app:; frame-ancestors 'none';
 ```
+- Non-HTML responses (such as images, fonts, stylesheet files, and JSON API payloads) return appropriate content-type headers without document-specific CSP directives.
 
 ### Process Isolation & WebPreferences
 `mainWindow` enforces:
@@ -82,22 +83,23 @@ frame-ancestors 'none';
 - `webSecurity: true`
 - `allowRunningInsecureContent: false`
 - `navigateOnDragDrop: false`
-- Navigation restrictions: `will-navigate` listener blocks external navigations; `will-attach-webview` prevents untrusted webviews.
+- Navigation restrictions: `will-navigate` blocks navigation away from `app://agriscan`; external links open via `shell.openExternal`; `will-attach-webview` prevents untrusted webviews.
 
 ### Graceful Child Process Termination
 Forced `taskkill` has been replaced by a graceful multi-step shutdown:
 1. Electron issues a graceful `{"action": "shutdown"}` message over the child's `stdin` pipe and closes the stream.
 2. The Python worker cleans up active SQLite WAL logs, closes handles, and terminates with code 0.
-3. A 3000ms watchdog timer falls back to process termination only if the child process hangs.
+3. A 3000ms watchdog timer falls back to direct process termination (`spawn('taskkill', ...)` without shell invocation) only if the child process hangs.
 
 ---
 
-## 4. Machine Learning Model Integrity (F-04)
+## 4. Machine Learning Model Integrity (F-04 / F-07)
 
 - The classification model (`backend/model.joblib`) is verified prior to deserialization.
 - Expected SHA-256 is pinned in `backend/model_manifest.json` (`90ad4a263d28f5d1414ede8241751c9dc2949e60966857acfdfc781d22489dfa`).
 - If the model file is altered, missing, or mismatched, `ModelIntegrityError` is raised and the application fails closed.
 - Model inferences force `n_jobs = 1` on desktop to eliminate loky multiprocessing worker deadlocks.
+- The system operates on four reconciled agronomic classes: `good`, `broken`, `chalky`, `discolored`.
 
 ---
 
@@ -112,31 +114,25 @@ Forced `taskkill` has been replaced by a graceful multi-step shutdown:
 
 ---
 
-## 6. Installer Integrity Verification & Code Signing (R-05)
+## 6. Installer Integrity Verification & Packaging Security (R-05 / S-03 / Additional 1)
 
-### Fail-Closed Payload Verification
+### Fail-Closed Constant-Time Payload Verification
 `AgriScanSetup.exe` contains a stamped SHA-256 checksum (`ExpectedPayloadSha256`). During installation:
 1. The embedded payload stream (`agriscan_payload.zip`) is read.
 2. The SHA-256 hash is computed in memory.
-3. The installer checks:
-   - `ExpectedPayloadSha256` is non-empty and a valid 64-character hexadecimal string.
-   - Computed hash equals expected hash in constant time.
+3. Hash verification enforces:
+   - `ExpectedPayloadSha256` must be non-empty and a valid 64-character hexadecimal string.
+   - Computed hash is compared against expected hash using a constant-time algorithm (`FixedTimeHexEquals`) iterating over all characters without early return.
    - If empty, invalid, or mismatched, a `SecurityException` is thrown and installation halts immediately.
 
-### Code Signing Workflow
-For production Windows distribution, release executables (`AgriScan.exe` and `AgriScanSetup.exe`) should be signed with an Authenticode code-signing certificate using Microsoft SignTool:
-```cmd
-signtool sign /tr http://timestamp.digicert.com /td sha256 /fd sha256 /a "AgriScanSetup.exe"
-signtool sign /tr http://timestamp.digicert.com /td sha256 /fd sha256 /a "AgriScan.exe"
-```
-Verification command:
-```cmd
-signtool verify /pa /v "AgriScanSetup.exe"
-```
+### Build-Time Packaging Security (Additional 1)
+- The installer build script (`scripts/build_installer.py`) enforces strict exclusion patterns blocking `.env`, `.env.*`, credential files, and private keys (`*.key`, `*.pem`, `*.token`, `.auth_token`).
+- Safe templates (`.env.example`) are preserved.
+- A build-time secret scan searches payload source files for embedded private keys and fails closed if detected.
 
 ---
 
-## 7. Known Limitations & Threat Boundaries
+## 7. Threat Boundaries & Honest Security Limitations
 
-1. **Same-User Local Boundary**: Like standard desktop software, local loopback tokens do not prevent access from other processes executing under the exact same Windows user account with debugger or memory inspection privileges.
-2. **Physical Machine Learning Certification**: The classification model is validated empirically against synthetic ground-truth images and requires further empirical benchmarking before commercial or laboratory certification (see `docs/report_validation.md`).
+1. **Same-User Operating System Boundary**: Like standard desktop software, local loopback tokens and named pipes provide isolation from unauthorized web origins and unprivileged network traffic. However, they do not isolate against other processes executing under the same OS user account with memory inspection or file access privileges.
+2. **Physical Machine Learning Calibration**: Model classifications achieve 42.1% empirical accuracy on standardized synthetic simulation scenes. Real-world photographs require physical camera calibration and are explicitly tagged with an "UNCALIBRATED MEASUREMENT" advisory when captured without a physical optical reference target (see `docs/report_validation.md`).
