@@ -1,8 +1,15 @@
 {
   "name": "agriscan",
   "version": "1.0.0",
-  "description": "AgriScan - Precision Optical Grain Assessment",
+  "description": "AgriScan - Precision Optical Grain Assessment Desktop Client",
   "main": "main.cjs",
-  "author": "AgriScan",
-  "license": "ISC"
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder"
+  },
+  "author": "AgriScan Precision Optics",
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "electron": "^34.0.0"
+  }
 }

@@ -15,6 +15,8 @@ BATCH_KEYS = {
     "variety",
     "lighting",
     "simulated",
+    "is_mock",
+    "measurement_status",
     "images",
     "calibration",
     "grains",
@@ -65,6 +67,7 @@ def test_real_scan_pipeline_returns_contract_and_saves_to_sqlite(
     monkeypatch.setattr(files_mount, "app", StaticFiles(directory=data_dir))
 
     with TestClient(main.app) as client:
+        client.headers["X-AgriScan-Token"] = main.get_api_token()
         response = client.post(
             "/api/scan",
             json={
@@ -84,7 +87,7 @@ def test_real_scan_pipeline_returns_contract_and_saves_to_sqlite(
         assert 80 <= batch["summary"]["total_grains"] <= 150
         assert set(batch["summary"]) == SUMMARY_KEYS
         assert set(batch["images"]) == {"raw", "calibrated", "annotated"}
-        assert set(batch["calibration"]) == {
+        assert set(batch["calibration"]) >= {
             "patch_error_before",
             "patch_error_after",
         }
@@ -129,6 +132,7 @@ def test_scan_pipeline_failure_returns_clear_json_error(
 
     monkeypatch.setattr(main, "make_scene", fail_scene)
     with TestClient(main.app) as client:
+        client.headers["X-AgriScan-Token"] = main.get_api_token()
         response = client.post(
             "/api/scan",
             json={

@@ -1,18 +1,20 @@
-# AgriScan - Optical Grain Quality Assessment & Morphometric Analysis
+# AgriScan - Precision Optical Grain Assessment & Morphometric Analysis
 
-AgriScan is a computer vision and machine learning platform engineered for automated rice grain inspection, morphometric quantification, and commercial grade classification. The system provides an end-to-end optical pipeline combining color chart calibration, adaptive morphological segmentation, and multi-class grain categorization.
+AgriScan is an enterprise computer vision and machine learning platform engineered for automated rice grain inspection, sub-millimeter morphometric quantification, and commercial grade classification. The system provides an end-to-end optical pipeline combining color reference calibration, adaptive morphological segmentation, and four-class grain defect categorization.
 
 ---
 
 ## Key Features
 
-- **Standardized Color Calibration**: Corrects ambient light temperature and spectral shifts across daylight, fluorescent tube, and ring-light environments using a 12-patch reference target.
-- **Sub-Millimeter Morphometrics**: Extracts individual grain contours to compute calibrated length, width, aspect ratio, projected surface area, and perimeter using ellipse fitting.
-- **Ensemble Classifier**: Categorizes grains into standard agronomic quality classes (*Good*, *Broken*, *Chalky*, *Damaged*, *Foreign*) using a trained Random Forest model with class probability estimation.
+- **Standardized Color Calibration**: Corrects ambient light temperature and spectral shifts across daylight, fluorescent tube, and ring-light environments using a 12-patch reference target with thin-plate spline / affine balancing.
+- **Sub-Millimeter Morphometrics**: Extracts individual grain contours using adaptive watershed segmentation to compute calibrated length, width, aspect ratio, projected surface area, and perimeter using ellipse fitting.
+- **Cryptographic Model Verification**: Random Forest classifier artifact verified against SHA-256 integrity manifest prior to deserialization to prevent tampering and arbitrary code execution.
+- **Agronomic 4-Class Categorization**: Accurately classifies grains into standard agronomic quality classes (*Good*, *Broken*, *Chalky*, *Discolored*) with class probability estimation.
+- **Zero-Port Desktop IPC**: Electron desktop integration communicates directly with the Python computer vision worker through secure stdin/stdout pipes and the custom `app://` protocol with strict path traversal containment.
 - **Dual Mode Operation**:
   - **Simulation Chamber**: Software-controlled optical chamber for repeatable synthetic batches, parameter benchmarking, and lighting experiments.
-  - **Direct Photo Upload**: Analyzes high-resolution field and laboratory photographs with drag-and-drop ingestion and automatic scale normalization.
-- **Audit & Batch Traceability**: SQLite-backed ledger preserving assessment summaries, grain-level records, distribution histograms, and reproducible inspection certificates.
+  - **Direct Photo Upload**: Analyzes high-resolution field and laboratory photographs with physical millimeter calibration support.
+- **Audit & Cryptographic Fingerprinting**: Deterministic multi-factor SHA-256 hashing binding morphometrics, class distribution, and image identity for tamper-evident inspection certificates.
 - **Interactive Inspection UI**: Responsive interface supporting both Precision Light and High-Contrast Dark modes, interactive grain sorting, and side-by-side calibration verification.
 
 ---
@@ -20,28 +22,25 @@ AgriScan is a computer vision and machine learning platform engineered for autom
 ## Architecture & Optical Pipeline
 
 ```
-[ Image Source: Simulation / Camera Upload ]
-                     │
-                     ▼
-       [ 12-Patch Color Calibration ]
-     (Affine / Thin-Plate Spline Balance)
-                     │
-                     ▼
-       [ Contrast Enhancement & CLAHE ]
-                     │
-                     ▼
-      [ Adaptive Watershed Segmentation ]
-         (Contour & Mask Extraction)
-                     │
-                     ▼
-        [ Morphometric Quantification ]
-   (Length, Width, Aspect Ratio, Color Stats)
-                     │
-                     ▼
-      [ Random Forest Multi-Class Model ]
-       (Defect Classification & Confidence)
-                     │
-                     ▼
+[ Image Source: Simulation / Photo Upload / Scanner ]
+                          │
+                          ▼
+             [ Reference Calibration ]
+        (12-Patch Thin-Plate Spline Balance)
+                          │
+                          ▼
+            [ Adaptive Watershed Segmentation ]
+               (Contour & Mask Extraction)
+                          │
+                          ▼
+              [ Morphometric Extraction ]
+        (Length, Width, Aspect Ratio, Color Stats)
+                          │
+                          ▼
+         [ Verified Random Forest Classifier ]
+             (SHA-256 Validated Joblib Model)
+                          │
+                          ▼
       [ Batch Aggregation & SQLite Ledger ]
 ```
 
@@ -56,10 +55,15 @@ agriscan/
 │   ├── database.py           # SQLite persistence layer and batch schema
 │   ├── fingerprint.py        # Unique batch identification hashing
 │   ├── grain_analysis.py     # Segmentation, feature extraction, and ML inference
-│   ├── main.py               # REST API endpoints and static asset serving
+│   ├── ipc_worker.py         # Portless stdin/stdout IPC bridge for Electron
+│   ├── main.py               # REST API endpoints and token authentication
 │   ├── model.joblib          # Trained Random Forest classifier artifact
+│   ├── model_manifest.json   # Cryptographic SHA-256 integrity manifest
 │   ├── simulator.py          # Optical chamber simulation engine
 │   └── train_classifier.py   # Training script for classification model
+├── electron/                 # Electron desktop wrapper
+│   ├── main.cjs              # Zero-port IPC bridge & protocol handler
+│   └── package.json          # Desktop packaging configuration
 ├── frontend/                 # Client interface (vanilla HTML5, CSS3, ES6+)
 │   ├── index.html            # Primary application view
 │   ├── app.js                # UI state management and API communication
@@ -69,14 +73,21 @@ agriscan/
 ├── tests/                    # Automated test suite
 │   ├── test_end_to_end.py
 │   ├── test_grain_analysis.py
+│   ├── test_ipc_worker.py
 │   ├── test_photo_upload.py
 │   ├── test_simulator_calibration.py
 │   └── test_validation.py
+├── validation/               # Model evaluation scripts and benchmarks
+│   ├── validate.py           # Ground-truth matching and metric calculation
+│   ├── validate_model.py     # Reproducible model evaluation runner
+│   └── run_experiment.py     # Multi-lighting benchmark runner
 ├── docs/                     # Specifications and contract documentation
-│   └── CONTRACT.md           # API and data structure specifications
-├── pyproject.toml            # Project build and dependency configuration
-├── requirements.txt          # Python package requirements
-└── start.bat                 # Windows quickstart launcher script
+│   ├── CONTRACT.md           # API and data structure specifications
+│   └── report_validation.md  # Formal model validation report
+├── AgriScan.exe              # Native Windows launcher
+├── requirements.txt          # Pinned Python package dependencies
+├── start.bat                 # Windows quickstart launcher script
+└── LICENSE                   # Apache 2.0 open-source license
 ```
 
 ---
@@ -84,12 +95,12 @@ agriscan/
 ## Installation & Setup
 
 ### Prerequisites
-- Python 3.10 or higher
-- Modern web browser (Chrome, Edge, Firefox, or Safari)
+- Python 3.10 to 3.13
+- Modern web browser (Chrome, Edge, Firefox, or Safari) or Electron desktop runtime
 
 ### 1. Environment Setup
 
-Clone the repository and create a Python virtual environment:
+Clone the repository and set up a Python virtual environment:
 
 ```powershell
 # Navigate to project directory
@@ -102,7 +113,7 @@ python -m venv .venv
 
 ### 2. Install Dependencies
 
-Install the required packages from `requirements.txt`:
+Install the pinned, verified dependencies from `requirements.txt`:
 
 ```powershell
 pip install -r requirements.txt
@@ -110,21 +121,22 @@ pip install -r requirements.txt
 
 ### 3. Launch the Application
 
-#### A. Launch as Standalone Windows Desktop App (Recommended)
-You can launch AgriScan as a native Windows desktop application with zero console windows:
-- **Desktop Shortcut**: Double-click the **`AgriScan`** shortcut created on your Windows Desktop.
-- **VBScript**: Double-click **`AgriScan.vbs`** (launches windowless in native WebView2).
-- **Batch Launcher**: Run **`start_app.bat`**.
-- **CLI**:
-  ```powershell
-  .\.venv\Scripts\python.exe app_desktop.py
-  ```
+#### A. Launch as Standalone Windows Desktop App (Zero Network Ports)
+Launch the compiled Windows desktop binary:
+```powershell
+.\AgriScan.exe
+```
+Or run directly through Electron:
+```powershell
+cd electron
+npx electron .
+```
 
 #### B. Launch in Web Browser Mode
-Start the FastAPI application with Uvicorn:
+Start the FastAPI backend with Uvicorn bound to loopback:
 
 ```powershell
-python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload
+python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
 ```
 
 Or execute the included launcher script:
@@ -133,23 +145,23 @@ Or execute the included launcher script:
 .\start.bat
 ```
 
-Once running, access the web interface at **`http://localhost:8000`**.
+Once running, access the web interface at **`http://127.0.0.1:8000`**.
 
 ---
 
 ## Verification & Testing
 
-AgriScan includes an end-to-end automated test suite verifying optical calibration accuracy, feature extraction bounds, API responses, and database transactions:
+AgriScan includes an end-to-end automated test suite verifying optical calibration accuracy, feature extraction bounds, API responses, IPC protocols, and security controls:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest -v
+python -m pytest -v
 ```
 
-All 24 test suites validate:
-- Morphometric measurements against simulated ground truth.
-- Color matrix calibration error bounds.
-- File upload handling and metadata persistence.
-- Random Forest probability scoring and threshold tagging.
+To run model validation across all lighting conditions:
+
+```powershell
+python validation/validate_model.py --grains 60
+```
 
 ---
 
@@ -157,23 +169,22 @@ All 24 test suites validate:
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `GET` | `/api/health` | Service status check and model warm-up confirmation |
-| `POST` | `/api/simulate` | Generates a synthetic grain batch with chosen lighting preset |
-| `POST` | `/api/upload` | Ingests a user-supplied grain photograph |
-| `POST` | `/api/assess` | Executes the complete segmentation, measurement, and classification pipeline |
-| `GET` | `/api/batches` | Retrieves list of recorded historical batches |
+| `GET` | `/api/health` | Service status check, worker health, and model integrity confirmation |
+| `GET` | `/api/auth/token` | Retrieve local loopback session token |
+| `POST` | `/api/scan` | Executes optical chamber simulation scan with chosen lighting preset |
+| `POST` | `/api/scan/upload` | Ingests and analyzes a user-supplied grain photograph |
+| `GET` | `/api/batches` | Retrieves paginated list of recorded historical batches |
 | `GET` | `/api/batches/{id}` | Fetches detailed metrics and grain coordinates for a specific batch |
-| `GET` | `/api/batches/{id}/export` | Exports batch report data in JSON format |
+| `GET` | `/api/batches/{id}/export` | Exports verified batch report data in JSON format |
 
 ---
 
 ## Quality Metrics & Standards
 
-- **Length / Width**: Measured in millimetres using calibrated optical scale factors.
+- **Length / Width**: Calibrated in millimetres using optical reference targets.
 - **Grain Classifications**:
-  - `good`: Intact, translucent, well-formed grain meeting length-to-width ratio specifications.
+  - `good`: Intact, translucent, well-formed grain meeting aspect-ratio specifications.
   - `broken`: Grains fractured below standardized length thresholds (< 75% of whole grain length).
   - `chalky`: Grains exhibiting opaque, starchy white discoloration covering > 20% surface area.
-  - `damaged`: Discolored, speckled, or heat-damaged kernels.
-  - `foreign`: Non-grain particulate matter or extraneous material.
-- **Confidence Scoring**: Model class posterior probability. Samples with borderline probabilities are logged for quality control verification.
+  - `discolored`: Grains showing dark spots, fungal staining, or heat discoloration.
+- **Confidence Scoring**: Model posterior probability computed for each grain. Borderline detections are highlighted for operator inspection.

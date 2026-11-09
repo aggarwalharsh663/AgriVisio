@@ -78,49 +78,51 @@ def _try_scan_wia():
     import tempfile
     import uuid
 
-    # Use PowerShell + WIA COM to scan
-    scan_id = uuid.uuid4().hex[:8]
-    temp_path = os.path.join(tempfile.gettempdir(), f"agriscan_hw_{scan_id}.jpg")
+    # Use PowerShell + WIA COM to scan securely with parameterized output path
+    scan_id = uuid.uuid4().hex
+    temp_path = os.path.abspath(os.path.join(tempfile.gettempdir(), f"agriscan_hw_{scan_id}.jpg"))
 
-    ps_script = f'''
+    ps_script = '''
+param([string]$outputPath)
+if ([string]::IsNullOrWhiteSpace($outputPath)) {
+    Write-Error "Invalid output path"
+    exit 1
+}
 Add-Type -AssemblyName System.Runtime.InteropServices
 $deviceManager = New-Object -ComObject WIA.DeviceManager
 $devices = $deviceManager.DeviceInfos
-if ($devices.Count -eq 0) {{
+if ($devices.Count -eq 0) {
     Write-Error "No scanner found"
     exit 1
-}}
+}
 $scanner = $null
-for ($i = 1; $i -le $devices.Count; $i++) {{
+for ($i = 1; $i -le $devices.Count; $i++) {
     $dev = $devices.Item($i)
-    if ($dev.Type -eq 1) {{
+    if ($dev.Type -eq 1) {
         $scanner = $dev
         break
-    }}
-}}
-if ($scanner -eq $null) {{
+    }
+}
+if ($scanner -eq $null) {
     Write-Error "No scanner found"
     exit 1
-}}
+}
 $device = $scanner.Connect()
 $item = $device.Items.Item(1)
 
-# Set scanner properties for high quality scan
-foreach ($prop in $item.Properties) {{
-    # Horizontal Resolution (DPI)
-    if ($prop.PropertyID -eq 6147) {{ $prop.Value = 300 }}
-    # Vertical Resolution (DPI)
-    if ($prop.PropertyID -eq 6148) {{ $prop.Value = 300 }}
-    # Color mode (1=color)
-    if ($prop.PropertyID -eq 6146) {{ $prop.Value = 1 }}
-}}
+foreach ($prop in $item.Properties) {
+    if ($prop.PropertyID -eq 6147) { $prop.Value = 300 }
+    if ($prop.PropertyID -eq 6148) { $prop.Value = 300 }
+    if ($prop.PropertyID -eq 6146) { $prop.Value = 1 }
+}
 
-$imageFile = $item.Transfer("{{B96B3CAE-0728-11D3-9D7B-0000F81EF32E}}")
-$imageFile.SaveFile("{temp_path}")
-Write-Output "SCAN_OK:{temp_path}"
+$imageFile = $item.Transfer("{B96B3CAE-0728-11D3-9D7B-0000F81EF32E}")
+if (Test-Path $outputPath) { Remove-Item $outputPath -Force }
+$imageFile.SaveFile($outputPath)
+Write-Output "SCAN_OK"
 '''
     result = subprocess.run(
-        ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_script],
+        ["powershell", "-NoProfile", "-NonInteractive", "-Command", "& { " + ps_script + " }", "-outputPath", temp_path],
         capture_output=True, text=True, timeout=90
     )
 

@@ -75,6 +75,7 @@ if (fs.existsSync(LOGO_PATH)) {
 const pendingRequests = new Map();
 let isWorkerReady = false;
 let workerReadyResolve = null;
+let lastWorkerHeartbeat = Date.now();
 const workerReadyPromise = new Promise((resolve) => {
   workerReadyResolve = resolve;
 });
@@ -106,6 +107,7 @@ function startPythonWorker() {
     if (!line) return;
     try {
       const msg = JSON.parse(line);
+      lastWorkerHeartbeat = Date.now();
       if (msg.event === 'ready') {
         log('Python worker is READY (Portless IPC established).');
         isWorkerReady = true;
@@ -148,10 +150,14 @@ function startPythonWorker() {
 function sendIpcRequest(action, data = {}, timeoutMs = 60000) {
   return new Promise(async (resolve, reject) => {
     if (!isWorkerReady) {
-      await Promise.race([
-        workerReadyPromise,
-        new Promise((_, r) => setTimeout(() => r(new Error('Timed out waiting for Python worker to initialize.')), 25000)),
-      ]);
+      try {
+        await Promise.race([
+          workerReadyPromise,
+          new Promise((_, r) => setTimeout(() => r(new Error('Timed out waiting for Python worker to initialize.')), 25000)),
+        ]);
+      } catch (err) {
+        return reject(err);
+      }
     }
 
     if (!pythonProcess || pythonProcess.killed) {
@@ -195,6 +201,100 @@ const mimeTypes = {
   '.mp4': 'video/mp4',
 };
 
+const UPLOAD_MAX_BYTES = 10 * 1024 * 1024; // 10 MB
+
+function safeDecodeURI(uri) {
+  if (typeof uri !== 'string') return null;
+  if (uri.includes('\0') || uri.includes('%00')) return null;
+  let decoded = uri;
+  let prev = '';
+  let iterations = 0;
+  while (decoded !== prev && iterations < 3) {
+    prev = decoded;
+    try {
+      decoded = decodeURIComponent(decoded);
+    } catch (e) {
+      return null;
+    }
+    iterations++;
+  }
+  if (decoded.includes('\0')) return null;
+  return decoded;
+}
+
+function resolveContainedPath(baseDir, requestedPath) {
+  if (!requestedPath || typeof requestedPath !== 'string') return null;
+  const decoded = safeDecodeURI(requestedPath);
+  if (decoded === null) return null;
+
+  // Reject traversal sequences in raw or decoded form
+  if (
+    decoded.includes('..') ||
+    decoded.includes('\\') ||
+    requestedPath.includes('..') ||
+    requestedPath.includes('%2e') ||
+    requestedPath.includes('%2E') ||
+    requestedPath.includes('%5c') ||
+    requestedPath.includes('%5C')
+  ) {
+    return null;
+  }
+
+  // Normalize and strip leading slashes
+  const normalizedRel = path.normalize(decoded).replace(/^[\/\\]+/, '');
+  if (normalizedRel.startsWith('..') || path.isAbsolute(normalizedRel)) {
+    return null;
+  }
+
+  const resolvedBase = path.resolve(baseDir);
+  const resolvedTarget = path.resolve(resolvedBase, normalizedRel);
+
+  // Containment check via path.relative
+  const rel = path.relative(resolvedBase, resolvedTarget);
+  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+    return null;
+  }
+
+  // Strict boundary check (protect against sibling prefix collisions)
+  if (resolvedTarget !== resolvedBase && !resolvedTarget.startsWith(resolvedBase + path.sep)) {
+    return null;
+  }
+
+  // Symlink escape check
+  if (fs.existsSync(resolvedTarget)) {
+    try {
+      const realTarget = fs.realpathSync(resolvedTarget);
+      const realBase = fs.realpathSync(resolvedBase);
+      const realRel = path.relative(realBase, realTarget);
+      if (realRel.startsWith('..') || path.isAbsolute(realRel)) {
+        return null;
+      }
+      if (realTarget !== realBase && !realTarget.startsWith(realBase + path.sep)) {
+        return null;
+      }
+      return realTarget;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  return resolvedTarget;
+}
+
+function isValidImageBuffer(buf) {
+  if (!buf || buf.length < 12) return false;
+  // JPEG: FF D8 FF
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return true;
+  // PNG: 89 50 4E 47 0D 0A 1A 0A
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return true;
+  // WebP: RIFF .... WEBP
+  if (
+    buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46 &&
+    buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50
+  ) return true;
+  return false;
+}
+
 // --- Custom app:// Protocol Handler (Zero Network Ports) ---
 function registerProtocolHandler() {
   protocol.handle('app', async (req) => {
@@ -213,6 +313,7 @@ function registerProtocolHandler() {
       // 2. API: /api/heartbeat
       if (pathname === '/api/heartbeat') {
         const result = await sendIpcRequest('heartbeat', {});
+        lastWorkerHeartbeat = Date.now();
         return new Response(JSON.stringify(result), {
           headers: { 'content-type': 'application/json' },
         });
@@ -220,7 +321,12 @@ function registerProtocolHandler() {
 
       // 3. API: /api/heartbeat/status
       if (pathname === '/api/heartbeat/status') {
-        return new Response(JSON.stringify({ active: true, seconds_since_last: 0 }), {
+        const isAlive = Boolean(pythonProcess && !pythonProcess.killed && isWorkerReady);
+        const secondsSince = (Date.now() - lastWorkerHeartbeat) / 1000.0;
+        return new Response(JSON.stringify({
+          active: isAlive && secondsSince < 30,
+          seconds_since_last: Math.round(secondsSince * 100) / 100,
+        }), {
           headers: { 'content-type': 'application/json' },
         });
       }
@@ -274,12 +380,27 @@ function registerProtocolHandler() {
           });
         }
 
+        const arrayBuffer = await file.arrayBuffer();
+        if (arrayBuffer.byteLength > UPLOAD_MAX_BYTES) {
+          return new Response(JSON.stringify({ detail: 'Photo must be 10 MB or smaller.' }), {
+            status: 413,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+
+        const buffer = Buffer.from(arrayBuffer);
+        if (!isValidImageBuffer(buffer)) {
+          return new Response(JSON.stringify({ detail: 'Choose a valid JPEG, PNG, or WebP photo.' }), {
+            status: 422,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+
         const ext = path.extname(file.name || 'uploaded.jpg').toLowerCase() || '.jpg';
         const tempName = `upload-${crypto.randomUUID()}${ext}`;
         const tempPath = path.join(TEMP_UPLOADS, tempName);
 
-        const arrayBuffer = await file.arrayBuffer();
-        fs.writeFileSync(tempPath, Buffer.from(arrayBuffer));
+        fs.writeFileSync(tempPath, buffer);
 
         try {
           const result = await sendIpcRequest('scan_upload', {
@@ -319,12 +440,15 @@ function registerProtocolHandler() {
 
       // 8. Static uploaded media & batch files (/files/...)
       if (pathname.startsWith('/files/')) {
-        const rel = pathname.slice('/files/'.length);
-        const filePath = path.join(DATA_DIR, rel);
-        if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
-          const ext = path.extname(filePath).toLowerCase();
+        const rawRel = pathname.slice('/files/'.length);
+        const resolvedPath = resolveContainedPath(DATA_DIR, rawRel);
+        if (!resolvedPath) {
+          return new Response('Access Denied', { status: 403 });
+        }
+        if (fs.existsSync(resolvedPath) && fs.statSync(resolvedPath).isFile()) {
+          const ext = path.extname(resolvedPath).toLowerCase();
           const contentType = mimeTypes[ext] || 'application/octet-stream';
-          const fileData = fs.readFileSync(filePath);
+          const fileData = fs.readFileSync(resolvedPath);
           return new Response(fileData, {
             headers: {
               'content-type': contentType,
@@ -349,15 +473,19 @@ function registerProtocolHandler() {
         }
       }
 
-      const filePath = path.join(FRONTEND_DIR, pathname.startsWith('/') ? pathname.slice(1) : pathname);
-      if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
-        const ext = path.extname(filePath).toLowerCase();
+      const rawStaticRel = pathname.replace(/^\/+/, '');
+      const resolvedStatic = resolveContainedPath(FRONTEND_DIR, rawStaticRel);
+      if (!resolvedStatic) {
+        return new Response('Access Denied', { status: 403 });
+      }
+      if (fs.existsSync(resolvedStatic) && fs.statSync(resolvedStatic).isFile()) {
+        const ext = path.extname(resolvedStatic).toLowerCase();
         const contentType = mimeTypes[ext] || 'application/octet-stream';
-        const fileData = fs.readFileSync(filePath);
+        const fileData = fs.readFileSync(resolvedStatic);
         return new Response(fileData, {
           headers: {
             'content-type': contentType,
-            'cache-control': pathname.endsWith('.html') || pathname.endsWith('.js') || pathname.endsWith('.css')
+            'cache-control': resolvedStatic.endsWith('.html') || resolvedStatic.endsWith('.js') || resolvedStatic.endsWith('.css')
               ? 'no-cache, no-store, must-revalidate'
               : 'public, max-age=86400',
           },
@@ -374,7 +502,6 @@ function registerProtocolHandler() {
     }
   });
 }
-
 function createSplash() {
   splashWindow = new BrowserWindow({
     width: 480,

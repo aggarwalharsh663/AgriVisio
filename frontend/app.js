@@ -321,7 +321,21 @@
 		document.querySelector("#report-batch").textContent = batch.batch_id;
 		document.querySelector("#report-date").textContent = Number.isNaN(created.valueOf()) ? "Date unavailable" : created.toLocaleString();
 		document.querySelector("#identity-batch").textContent = batch.batch_id;
-		document.querySelector("#fingerprint-hash").textContent = batch.fingerprint?.hash || "—";
+		document.querySelector("#fingerprint-hash").textContent = batch.fingerprint?.hash || (typeof batch.fingerprint === "string" ? batch.fingerprint : "—");
+		// Display mock and calibration warnings
+		const mockBanner = document.querySelector("#mock-warning-banner");
+		if (mockBanner) {
+			const isMock = Boolean(batch.is_mock || batch.simulated || batch.mock_mode);
+			mockBanner.style.display = isMock ? "flex" : "none";
+			mockBanner.hidden = !isMock;
+		}
+		const uncalBanner = document.querySelector("#uncalibrated-warning-banner");
+		if (uncalBanner) {
+			const isUncal = Boolean(batch.calibration?.status === "uncalibrated" || (uploadedPhoto && !batch.calibration?.calibrated));
+			uncalBanner.style.display = isUncal ? "flex" : "none";
+			uncalBanner.hidden = !isUncal;
+		}
+
 		document.querySelector("#mean-length").textContent = Number(summary.mean_length_mm).toFixed(2);
 		document.querySelector("#mean-width").textContent = Number(summary.mean_width_mm).toFixed(2);
 		document.querySelector("#summary-good").textContent = `${summary.percent.good ?? 0}%`;
@@ -722,14 +736,19 @@
 	}
 
 	function generateStandaloneReportHtml(currentBatch, batchId) {
-		const sampleName = currentBatch?.sample_name || document.querySelector("#report-sample")?.textContent || "Sample";
-		const variety = currentBatch?.variety || document.querySelector("#report-variety")?.textContent || "Rice";
-		const totalGrains = currentBatch?.summary?.total_grains || currentBatch?.grains?.length || document.querySelector("#report-count")?.textContent || "0";
-		const dateStr = currentBatch?.created_at ? new Date(currentBatch.created_at).toLocaleString() : new Date().toLocaleString();
-		const goodPct = document.querySelector("#summary-good")?.textContent || "-";
-		const meanLength = document.querySelector("#mean-length")?.textContent || "-";
-		const meanWidth = document.querySelector("#mean-width")?.textContent || "-";
-		const fingerprint = currentBatch?.fingerprint || document.querySelector("#fingerprint-hash")?.textContent || "-";
+		const sampleName = escapeHtml(currentBatch?.sample_name || document.querySelector("#report-sample")?.textContent || "Sample");
+		const variety = escapeHtml(currentBatch?.variety || document.querySelector("#report-variety")?.textContent || "Rice");
+		const totalGrains = escapeHtml(currentBatch?.summary?.total_grains || currentBatch?.grains?.length || document.querySelector("#report-count")?.textContent || "0");
+		const dateStr = escapeHtml(currentBatch?.created_at ? new Date(currentBatch.created_at).toLocaleString() : new Date().toLocaleString());
+		const goodPct = escapeHtml(document.querySelector("#summary-good")?.textContent || "-");
+		const meanLength = escapeHtml(document.querySelector("#mean-length")?.textContent || "-");
+		const meanWidth = escapeHtml(document.querySelector("#mean-width")?.textContent || "-");
+		const fpObj = currentBatch?.fingerprint;
+		const fingerprint = escapeHtml((typeof fpObj === "object" && fpObj !== null ? fpObj.hash : fpObj) || document.querySelector("#fingerprint-hash")?.textContent || "-");
+		const safeBatchId = escapeHtml(batchId || currentBatch?.batch_id || "Report");
+
+		const isMockData = Boolean(currentBatch?.is_mock || currentBatch?.simulated);
+		const isUncalibrated = Boolean(currentBatch?.calibration?.status === "uncalibrated");
 
 		const grains = currentBatch?.grains || [];
 		let rowsHtml = "";
@@ -739,12 +758,12 @@
 			const len = Number(g.length_mm).toFixed(2);
 			const wid = Number(g.width_mm).toFixed(2);
 			rowsHtml += `<tr>
-				<td>${g.id}</td>
-				<td><strong>${label}</strong></td>
-				<td>${len} mm</td>
-				<td>${wid} mm</td>
+				<td>${escapeHtml(g.id)}</td>
+				<td><strong>${escapeHtml(label)}</strong></td>
+				<td>${escapeHtml(len)} mm</td>
+				<td>${escapeHtml(wid)} mm</td>
 				<td>${conf}%</td>
-				<td><small>${g.reason || ""}</small></td>
+				<td><small>${escapeHtml(g.reason || "")}</small></td>
 			</tr>`;
 		}
 
@@ -752,7 +771,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>AgriScan Report - ${batchId}</title>
+<title>AgriScan Report - ${safeBatchId}</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #ffffff; color: #0f172a; padding: 32px; line-height: 1.5; }
@@ -761,6 +780,8 @@
   .header-text h1 { font-size: 26px; font-weight: 900; letter-spacing: 0.05em; color: #0f172a; }
   .header-text h1 span { color: #d97706; }
   .header-text p { font-size: 13px; color: #64748b; font-weight: 600; }
+  .banner-mock { background: #fef2f2; border: 2px dashed #dc2626; color: #991b1b; padding: 12px; margin-bottom: 20px; text-align: center; font-weight: 800; border-radius: 6px; letter-spacing: 0.05em; }
+  .banner-uncal { background: #fffbeb; border: 1px solid #f59e0b; color: #92400e; padding: 10px; margin-bottom: 20px; text-align: center; font-weight: 700; border-radius: 6px; }
   .hero-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 24px; }
   .card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; }
   .card span { font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: 700; letter-spacing: 0.05em; display: block; margin-bottom: 4px; }
@@ -782,9 +803,11 @@
       <p>Precision Optical Grain Quality Assessment Report</p>
     </div>
   </div>
+  ${isMockData ? '<div class="banner-mock">&#9888; SIMULATED / MOCK DATA &mdash; NOT A PHYSICAL LABORATORY MEASUREMENT</div>' : ''}
+  ${isUncalibrated ? '<div class="banner-uncal">&#128207; UNCALIBRATED MEASUREMENT (Scale is an estimate)</div>' : ''}
   <div class="hero-grid">
     <div class="card"><span>Sample Name</span><strong>${sampleName}</strong><small>${variety}</small></div>
-    <div class="card"><span>Assessment ID</span><strong>${batchId}</strong><small>${dateStr}</small></div>
+    <div class="card"><span>Assessment ID</span><strong>${safeBatchId}</strong><small>${dateStr}</small></div>
     <div class="card"><span>Total Grains</span><strong>${totalGrains}</strong><small>optically checked</small></div>
     <div class="card"><span>Good Grains</span><strong>${goodPct}</strong><small>of batch sample</small></div>
     <div class="card"><span>Mean Length</span><strong>${meanLength} mm</strong><small>calibrated length</small></div>
@@ -796,7 +819,7 @@
     <tbody>${rowsHtml}</tbody>
   </table>
   <div class="footer">
-    <span>AgriScan Precision Optics • Laboratory Assessment Report</span>
+    <span>AgriScan Precision Optics &bull; Laboratory Assessment Report</span>
     <span>Fingerprint: <code>${fingerprint}</code></span>
   </div>
 </body>

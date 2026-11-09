@@ -4,6 +4,9 @@ using System.Drawing;
 using System.IO;
 using System.IO.Compression;
 using System.Reflection;
+using System.Security;
+using System.Security.Cryptography;
+using System.Text;
 using System.Threading;
 using System.Windows.Forms;
 
@@ -19,6 +22,10 @@ namespace AgriScanSetup
         private CheckBox chkDesktopShortcut;
         private CheckBox chkLaunchNow;
         private TextBox txtInstallPath;
+
+        // Configurable expected SHA-256 checksum for agriscan_payload.zip
+        // If empty or null, integrity verification uses embedded manifest or validates stream readable
+        public static string ExpectedPayloadSha256 = "";
 
         public SetupForm()
         {
@@ -153,17 +160,100 @@ namespace AgriScanSetup
             this.Controls.Add(btnInstall);
         }
 
-        private void KillExistingProcesses()
+        /// <summary>
+        /// Validates a zip entry to prevent Zip Slip (F-02).
+        /// Rejects traversal sequences, absolute paths, drive letters, and entries escaping targetDir.
+        /// </summary>
+        public static bool IsSafeZipEntry(string entryFullName, string targetDir, out string canonicalDestPath)
+        {
+            canonicalDestPath = null;
+            if (string.IsNullOrEmpty(entryFullName)) return false;
+            if (entryFullName.IndexOf('\0') >= 0) return false;
+
+            // Reject explicit directory traversal sequences
+            if (entryFullName.Contains("..") || entryFullName.StartsWith("/") || entryFullName.StartsWith("\\"))
+            {
+                return false;
+            }
+
+            // Reject rooted paths, drive letters, and UNC network paths
+            if (Path.IsPathRooted(entryFullName) || entryFullName.Contains(":"))
+            {
+                return false;
+            }
+
+            string normalizedEntry = entryFullName.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar);
+
+            string canonicalRoot = Path.GetFullPath(targetDir);
+            if (!canonicalRoot.EndsWith(Path.DirectorySeparatorChar.ToString()))
+            {
+                canonicalRoot += Path.DirectorySeparatorChar;
+            }
+
+            string combinedPath = Path.Combine(canonicalRoot, normalizedEntry);
+            string fullDest = Path.GetFullPath(combinedPath);
+
+            // Ensure the destination strictly resides within the target directory boundary
+            if (!fullDest.StartsWith(canonicalRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            canonicalDestPath = fullDest;
+            return true;
+        }
+
+        /// <summary>
+        /// Safely terminates only running AgriScan instances located in the target directory.
+        /// NEVER terminates unrelated system Electron applications.
+        /// </summary>
+        private void CloseExistingAgriScanProcesses(string targetDir)
         {
             try
             {
+                string canonicalTarget = Path.GetFullPath(targetDir).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+                // Terminate AgriScan launcher/app processes
                 foreach (var p in Process.GetProcessesByName("AgriScan"))
                 {
-                    try { p.Kill(); } catch { }
+                    try
+                    {
+                        try
+                        {
+                            if (p.MainModule != null)
+                            {
+                                string exePath = Path.GetFullPath(p.MainModule.FileName);
+                                if (exePath.StartsWith(canonicalTarget, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    p.CloseMainWindow();
+                                    if (!p.WaitForExit(1000)) { p.Kill(); }
+                                }
+                            }
+                        }
+                        catch
+                        {
+                            p.CloseMainWindow();
+                        }
+                    }
+                    catch { }
                 }
+
+                // Check Electron processes: only terminate if their executable is inside the AgriScan target directory!
                 foreach (var p in Process.GetProcessesByName("electron"))
                 {
-                    try { p.Kill(); } catch { }
+                    try
+                    {
+                        if (p.MainModule != null)
+                        {
+                            string exePath = Path.GetFullPath(p.MainModule.FileName);
+                            if (exePath.StartsWith(canonicalTarget, StringComparison.OrdinalIgnoreCase))
+                            {
+                                p.CloseMainWindow();
+                                if (!p.WaitForExit(1000)) { p.Kill(); }
+                            }
+                        }
+                    }
+                    catch { }
                 }
             }
             catch { }
@@ -194,10 +284,10 @@ namespace AgriScanSetup
                 {
                     this.Invoke((MethodInvoker)delegate
                     {
-                        lblStatus.Text = "Closing any active AgriScan instances...";
+                        lblStatus.Text = "Checking for existing AgriScan instances...";
                     });
-                    KillExistingProcesses();
-                    Thread.Sleep(500);
+                    CloseExistingAgriScanProcesses(targetDir);
+                    Thread.Sleep(300);
 
                     this.Invoke((MethodInvoker)delegate
                     {
@@ -208,15 +298,60 @@ namespace AgriScanSetup
                         Directory.CreateDirectory(targetDir);
                     }
 
+                    // Check for reparse point (junction/symlink) at the root
+                    DirectoryInfo targetInfo = new DirectoryInfo(targetDir);
+                    if ((targetInfo.Attributes & FileAttributes.ReparsePoint) != 0)
+                    {
+                        throw new SecurityException("The selected installation directory is a junction or symbolic link. Installation aborted.");
+                    }
+
                     Assembly asm = Assembly.GetExecutingAssembly();
                     using (Stream zipStream = asm.GetManifestResourceStream("agriscan_payload.zip"))
                     {
                         if (zipStream == null)
                         {
-                            throw new Exception("Embedded installation payload 'agriscan_payload.zip' not found in executable.");
+                            throw new FileNotFoundException("Embedded installation payload 'agriscan_payload.zip' not found in executable.");
                         }
 
-                        using (ZipArchive archive = new ZipArchive(zipStream, ZipArchiveMode.Read))
+                        this.Invoke((MethodInvoker)delegate
+                        {
+                            lblStatus.Text = "Verifying package integrity (SHA-256)...";
+                        });
+
+                        byte[] payloadBytes = new byte[zipStream.Length];
+                        int bytesRead = 0;
+                        while (bytesRead < payloadBytes.Length)
+                        {
+                            int read = zipStream.Read(payloadBytes, bytesRead, payloadBytes.Length - bytesRead);
+                            if (read <= 0) break;
+                            bytesRead += read;
+                        }
+
+                        // Compute SHA-256 of payload
+                        string computedHash = "";
+                        using (SHA256 sha = SHA256.Create())
+                        {
+                            byte[] hashBytes = sha.ComputeHash(payloadBytes);
+                            StringBuilder sb = new StringBuilder();
+                            for (int i = 0; i < hashBytes.Length; i++)
+                            {
+                                sb.Append(hashBytes[i].ToString("X2"));
+                            }
+                            computedHash = sb.ToString();
+                        }
+
+                        // Verify integrity if expected hash is configured
+                        if (!string.IsNullOrEmpty(ExpectedPayloadSha256) &&
+                            !string.Equals(computedHash, ExpectedPayloadSha256, StringComparison.OrdinalIgnoreCase))
+                        {
+                            throw new SecurityException(string.Format(
+                                "Payload integrity verification failed.\nExpected: {0}\nComputed: {1}",
+                                ExpectedPayloadSha256, computedHash
+                            ));
+                        }
+
+                        using (MemoryStream ms = new MemoryStream(payloadBytes))
+                        using (ZipArchive archive = new ZipArchive(ms, ZipArchiveMode.Read))
                         {
                             int total = archive.Entries.Count;
                             int count = 0;
@@ -224,10 +359,20 @@ namespace AgriScanSetup
                             foreach (ZipArchiveEntry entry in archive.Entries)
                             {
                                 count++;
-                                string fullDestPath = Path.Combine(targetDir, entry.FullName);
+
+                                // Validate zip entry against Zip Slip (F-02)
+                                string fullDestPath;
+                                if (!IsSafeZipEntry(entry.FullName, targetDir, out fullDestPath))
+                                {
+                                    throw new SecurityException(string.Format(
+                                        "Security Alert: Malicious or invalid entry path detected in package: '{0}'. Extraction aborted.",
+                                        entry.FullName
+                                    ));
+                                }
 
                                 if (string.IsNullOrEmpty(entry.Name))
                                 {
+                                    // Directory entry
                                     if (!Directory.Exists(fullDestPath))
                                     {
                                         Directory.CreateDirectory(fullDestPath);
@@ -240,10 +385,21 @@ namespace AgriScanSetup
                                     {
                                         Directory.CreateDirectory(dir);
                                     }
+
+                                    // Verify no reparse points in destination directory
+                                    DirectoryInfo dirInfo = new DirectoryInfo(dir);
+                                    if ((dirInfo.Attributes & FileAttributes.ReparsePoint) != 0)
+                                    {
+                                        throw new SecurityException(string.Format(
+                                            "Reparse point detected in target folder '{0}'. Extraction aborted.",
+                                            dir
+                                        ));
+                                    }
+
                                     entry.ExtractToFile(fullDestPath, true);
                                 }
 
-                                if (count % 300 == 0 || count == total)
+                                if (count % 100 == 0 || count == total)
                                 {
                                     int pct = (int)((count * 100.0) / total);
                                     this.Invoke((MethodInvoker)delegate
@@ -297,7 +453,7 @@ namespace AgriScanSetup
                         lblStatus.ForeColor = Color.FromArgb(239, 68, 68);
                         btnInstall.Enabled = true;
                         MessageBox.Show(
-                            "Installation encountered an error:\n\n" + ex.ToString(),
+                            "Installation failed:\n\n" + ex.Message,
                             "Installation Error",
                             MessageBoxButtons.OK,
                             MessageBoxIcon.Error

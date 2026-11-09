@@ -41,6 +41,7 @@ def _run_scans() -> list[dict]:
                     for lighting in LIGHTINGS:
                         response = client.post(
                             "/api/scan",
+                            headers={"X-AgriScan-Token": backend_main.get_api_token()},
                             json={
                                 "lighting": lighting,
                                 "n_grains": N_GRAINS,

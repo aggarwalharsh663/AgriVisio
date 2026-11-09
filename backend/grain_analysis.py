@@ -1,5 +1,7 @@
 """Basic grain segmentation and measurements for simulated rice images."""
 
+import hashlib
+import json
 from functools import lru_cache
 from pathlib import Path
 
@@ -7,6 +9,45 @@ import cv2
 import joblib
 import numpy as np
 import scipy.ndimage
+
+MODEL_PATH = Path(__file__).with_name("model.joblib")
+MANIFEST_PATH = Path(__file__).with_name("model_manifest.json")
+
+
+class ModelIntegrityError(RuntimeError):
+    """Raised when the classifier model artifact fails integrity or provenance verification."""
+    pass
+
+
+def verify_model_integrity(model_path: Path = MODEL_PATH, manifest_path: Path = MANIFEST_PATH) -> dict:
+    """Verify SHA-256 integrity and provenance of the model artifact before loading."""
+    if not model_path.is_file():
+        raise ModelIntegrityError(f"Classifier model file not found at {model_path}.")
+    if not manifest_path.is_file():
+        raise ModelIntegrityError(f"Model manifest not found at {manifest_path}.")
+
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise ModelIntegrityError(f"Could not parse model manifest: {exc}")
+
+    expected_sha256 = manifest.get("sha256")
+    if not expected_sha256:
+        raise ModelIntegrityError("Model manifest does not specify expected 'sha256' checksum.")
+
+    hasher = hashlib.sha256()
+    with open(model_path, "rb") as f:
+        while chunk := f.read(65536):
+            hasher.update(chunk)
+    actual_sha256 = hasher.hexdigest().lower()
+
+    if actual_sha256 != expected_sha256.lower():
+        raise ModelIntegrityError(
+            f"Security Error: Classifier model integrity verification failed! "
+            f"Expected SHA-256: {expected_sha256}, Actual: {actual_sha256}. "
+            "Artifact may be modified, substituted, or corrupted."
+        )
+    return manifest
 
 
 CARD_IGNORE_X = 970
@@ -43,56 +84,6 @@ LABEL_COLORS_BGR = {
     "chalky": (0, 165, 255),
     "discolored": (180, 0, 180),
 }
-MODEL_PATH = Path(__file__).with_name("model.joblib")
-
-
-class FallbackGrainClassifier:
-    """Very small pure-Python classifier used when sklearn is unavailable."""
-
-    classes_ = ["good", "broken", "chalky", "discolored"]
-    feature_importances_ = np.array(
-        [0.34, 0.22, 0.18, 0.14, 0.04, 0.04, 0.03, 0.01],
-        dtype=float,
-    )
-
-    def predict_proba(self, features: np.ndarray | list[list[float]]) -> np.ndarray:
-        rows = np.asarray(features, dtype=float)
-        if rows.ndim == 1:
-            rows = rows.reshape(1, -1)
-
-        probabilities = []
-        for row in rows:
-            length_mm, width_mm, lb_ratio, chalk_fraction, *_ = row
-            scores = {
-                "good": 0.40,
-                "broken": 0.15,
-                "chalky": 0.15,
-                "discolored": 0.15,
-            }
-            if width_mm < 1.5 or lb_ratio < 1.5:
-                scores["broken"] += 0.40
-            if chalk_fraction > 0.25:
-                scores["chalky"] += 0.55
-            if length_mm < 4.0 or width_mm < 1.2:
-                scores["broken"] += 0.20
-            if chalk_fraction > 0.5:
-                scores["chalky"] += 0.30
-            if lb_ratio > 4.0:
-                scores["good"] += 0.10
-            if np.mean(row[4:7]) < 160:
-                scores["discolored"] += 0.30
-            if np.mean(row[4:7]) > 220 and chalk_fraction < 0.1:
-                scores["good"] += 0.25
-            total = sum(scores.values())
-            probabilities.append(
-                [scores[label] / total for label in self.classes_]
-            )
-        return np.asarray(probabilities, dtype=float)
-
-    def predict(self, features):
-        probabilities = self.predict_proba(features)
-        return [self.classes_[int(np.argmax(row))] for row in probabilities]
-
 
 def _measure_grain_details(
     contour: np.ndarray,
@@ -100,18 +91,17 @@ def _measure_grain_details(
     mm_per_pixel: float,
     is_blue_tray: bool = False,
 ) -> tuple[dict, float]:
-    """Measure one grain and return the mean HSV saturation for classification."""
+    """Measure one grain and return physical dimensions and mean HSV saturation for classification."""
     if mm_per_pixel <= 0:
         raise ValueError("mm_per_pixel must be greater than zero")
     if image is None or image.ndim != 3 or image.shape[2] != 3:
         raise ValueError("image must be a three-channel BGR image")
 
     (center_x, center_y), (side_a, side_b), _ = cv2.minAreaRect(contour)
-    is_high_broken = is_blue_tray and (max(side_a, side_b) * mm_per_pixel < 4.5)
-    length_scale = 1.0
-    width_scale = 1.02 if is_high_broken else (0.916 if is_blue_tray else 1.0)
-    length_mm = max(side_a, side_b) * mm_per_pixel * length_scale
-    width_mm = min(side_a, side_b) * mm_per_pixel * width_scale
+    # Physical grain dimensions are derived strictly from calibrated mm_per_pixel
+    # without artificial scaling based on tray color or variety names.
+    length_mm = max(side_a, side_b) * mm_per_pixel
+    width_mm = min(side_a, side_b) * mm_per_pixel
     x, y, box_width, box_height = cv2.boundingRect(contour)
 
     crop_bgr = image[y : y + box_height, x : x + box_width]
@@ -365,26 +355,34 @@ def measure_grain(
 
 @lru_cache(maxsize=1)
 def _load_model() -> dict:
-    """Load and cache the trained classifier once per process."""
-    if not MODEL_PATH.is_file():
-        raise FileNotFoundError(
-            f"Classifier model not found at {MODEL_PATH}; "
-            "run python -m backend.train_classifier first"
-        )
+    """Load and cache the trained classifier once per process after strict integrity verification.
+
+    Never falls back to an unvalidated hidden classifier. Fails closed if the artifact
+    is missing, corrupted, or fails checksum verification.
+    """
+    manifest = verify_model_integrity(MODEL_PATH, MANIFEST_PATH)
     try:
         bundle = joblib.load(MODEL_PATH)
-    except Exception:
-        bundle = {
-            "model": FallbackGrainClassifier(),
-            "feature_names": list(FEATURE_NAMES),
-        }
+    except Exception as exc:
+        raise ModelIntegrityError(f"Failed to deserialize verified classifier artifact {MODEL_PATH}: {exc}")
+
+    if not isinstance(bundle, dict) or "model" not in bundle:
+        raise ModelIntegrityError(f"Classifier bundle at {MODEL_PATH} is malformed or invalid.")
+
     if bundle.get("feature_names") != list(FEATURE_NAMES):
-        raise ValueError(f"Classifier features do not match {MODEL_PATH}")
+        raise ValueError(f"Classifier features do not match expected schema: {FEATURE_NAMES}")
+
     model = bundle["model"]
+    if not hasattr(model, "feature_importances_"):
+        raise ModelIntegrityError(f"Model object in {MODEL_PATH} lacks feature_importances_.")
+    if hasattr(model, "n_jobs"):
+        model.n_jobs = 1  # Force single-process inference on desktop to prevent loky multiprocessing deadlocks
+
     importance_order = np.argsort(model.feature_importances_)[::-1][:2]
     bundle["top_features"] = [
         FEATURE_LABELS[FEATURE_NAMES[index]] for index in importance_order
     ]
+    bundle["manifest"] = manifest
     return bundle
 
 

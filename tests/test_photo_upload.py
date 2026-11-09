@@ -31,6 +31,7 @@ def test_uploaded_photo_is_analyzed_with_an_estimated_scale(tmp_path, monkeypatc
     monkeypatch.setattr(files_mount, "app", StaticFiles(directory=data_dir))
 
     with TestClient(main.app) as client:
+        client.headers["X-AgriScan-Token"] = main.get_api_token()
         response = client.post(
             "/api/scan/upload",
             data={
@@ -43,7 +44,7 @@ def test_uploaded_photo_is_analyzed_with_an_estimated_scale(tmp_path, monkeypatc
 
         assert response.status_code == 200, response.text
         batch = response.json()
-        assert batch["simulated"] is True
+        assert batch["simulated"] is False  # Remediated: Real photo is not simulated
         assert set(batch) == {
             "batch_id",
             "created_at",
@@ -51,6 +52,8 @@ def test_uploaded_photo_is_analyzed_with_an_estimated_scale(tmp_path, monkeypatc
             "variety",
             "lighting",
             "simulated",
+            "is_mock",
+            "measurement_status",
             "images",
             "calibration",
             "grains",
@@ -59,10 +62,8 @@ def test_uploaded_photo_is_analyzed_with_an_estimated_scale(tmp_path, monkeypatc
             "validation",
         }
         assert batch["images"]["raw"].endswith("/uploaded-photo.jpg")
-        assert batch["calibration"] == {
-            "patch_error_before": None,
-            "patch_error_after": None,
-        }
+        assert batch["calibration"]["patch_error_before"] is None
+        assert batch["calibration"]["calibration_status"] == "UNCALIBRATED"
         assert batch["summary"]["total_grains"] > 0
         assert batch["validation"]["accuracy"] is None
         assert "precision" in batch["validation"]["per_class"]["good"]
@@ -83,6 +84,7 @@ def test_uploaded_photo_rejects_invalid_image(tmp_path, monkeypatch):
     monkeypatch.setattr(main, "DATABASE_PATH", tmp_path / "agriscan.sqlite3")
 
     with TestClient(main.app) as client:
+        client.headers["X-AgriScan-Token"] = main.get_api_token()
         response = client.post(
             "/api/scan/upload",
             data={
@@ -120,6 +122,7 @@ def test_uploaded_photo_detects_dense_grains_across_the_full_frame(
     assert success
 
     with TestClient(main.app) as client:
+        client.headers["X-AgriScan-Token"] = main.get_api_token()
         response = client.post(
             "/api/scan/upload",
             data={
@@ -154,6 +157,7 @@ def test_uploaded_photo_counts_dense_167_grain_sample(tmp_path, monkeypatch):
     assert success
 
     with TestClient(main.app) as client:
+        client.headers["X-AgriScan-Token"] = main.get_api_token()
         response = client.post(
             "/api/scan/upload",
             data={
@@ -189,12 +193,15 @@ def test_uploaded_blue_tray_photo_uses_calibrated_scale(tmp_path, monkeypatch):
     assert success
 
     with TestClient(main.app) as client:
+        client.headers["X-AgriScan-Token"] = main.get_api_token()
+        # When calibration parameters are provided, it is calibrated
         response = client.post(
             '/api/scan/upload',
             data={
                 'sample_name': 'Scanner Bed Blue Tray',
                 'variety': '1121 Steam',
                 'lighting': 'daylight',
+                'calibration_mm_per_pixel': '0.09173',
             },
             files={'image': ('blue-tray.jpg', encoded.tobytes(), 'image/jpeg')},
         )
@@ -202,4 +209,6 @@ def test_uploaded_blue_tray_photo_uses_calibrated_scale(tmp_path, monkeypatch):
     assert response.status_code == 200, response.text
     batch = response.json()
     assert batch['summary']['total_grains'] == 20
-    assert any('Calibrated scanner bed scale' in g['reason'] for g in batch['grains'])
+    assert batch['calibration']['calibration_status'] == 'CALIBRATED'
+    assert batch['calibration']['mm_per_pixel'] == 0.09173
+    assert any('Calibrated scale' in g['reason'] for g in batch['grains'])
