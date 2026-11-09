@@ -15,10 +15,11 @@ protocol.registerSchemesAsPrivileged([
       supportFetchAPI: true,
       corsEnabled: true,
       stream: true,
-      bypassCSP: true,
     },
   },
 ]);
+
+const CSP_POLICY = "default-src 'self' app:; script-src 'self' app:; style-src 'self' 'unsafe-inline' app: https://fonts.googleapis.com; font-src 'self' app: https://fonts.gstatic.com data:; img-src 'self' app: data: blob:; connect-src 'self' app: http://127.0.0.1:* http://localhost:*; object-src 'none'; base-uri 'self' app:; frame-ancestors 'none';";
 
 const LOG_FILE = path.join(__dirname, 'electron.log');
 function log(...args) {
@@ -468,6 +469,9 @@ function registerProtocolHandler() {
             headers: {
               'content-type': 'text/html; charset=utf-8',
               'cache-control': 'no-cache, no-store, must-revalidate',
+              'x-content-type-options': 'nosniff',
+              'x-frame-options': 'DENY',
+              'content-security-policy': CSP_POLICY,
             },
           });
         }
@@ -717,16 +721,47 @@ ipcMain.handle('save-report-pdf', async (event, { batchId }) => {
   }
 });
 
-function stopBackend() {
-  if (pythonProcess) {
-    try {
-      if (process.platform === 'win32' && pythonProcess.pid) {
-        exec(`taskkill /pid ${pythonProcess.pid} /T /F`, () => {});
-      } else {
-        pythonProcess.kill();
+function stopBackend(callback) {
+  if (!pythonProcess) {
+    if (callback) callback();
+    return;
+  }
+  const proc = pythonProcess;
+  pythonProcess = null;
+
+  try {
+    log('Initiating graceful shutdown of Python worker...');
+    if (proc.stdin && !proc.stdin.destroyed) {
+      try {
+        proc.stdin.write(JSON.stringify({ action: 'shutdown' }) + '\n');
+        proc.stdin.end();
+      } catch (e) {}
+    }
+
+    let exited = false;
+    const forceKillTimer = setTimeout(() => {
+      if (!exited) {
+        log('Graceful shutdown timeout (3000ms) expired; terminating process forcibly.');
+        try {
+          if (process.platform === 'win32' && proc.pid) {
+            exec(`taskkill /pid ${proc.pid} /T /F`, () => {});
+          } else {
+            proc.kill('SIGKILL');
+          }
+        } catch (e) {}
       }
-    } catch (e) {}
-    pythonProcess = null;
+      if (callback) callback();
+    }, 3000);
+
+    proc.once('exit', (code, signal) => {
+      exited = true;
+      clearTimeout(forceKillTimer);
+      log(`Python worker exited cleanly (code: ${code}, signal: ${signal}).`);
+      if (callback) callback();
+    });
+  } catch (err) {
+    log('Error during stopBackend:', err);
+    if (callback) callback();
   }
 }
 

@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from statistics import mean, pstdev
+import logging
 from typing import Any
 from uuid import uuid4
 
@@ -32,6 +33,9 @@ from backend.simulator import make_scene
 from validation.validate import compare
 
 
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+LOGGER = logging.getLogger("agriscan")
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = PROJECT_ROOT / "frontend"
 DATA_DIR = PROJECT_ROOT / "data"
@@ -44,6 +48,55 @@ LABELS = ["good", "broken", "chalky", "discolored"]
 UPLOAD_MAX_BYTES = 10 * 1024 * 1024       # 10 MB limit
 UPLOAD_MAX_PIXELS = 20_000_000            # 20 Megapixel limit
 ESTIMATED_MM_PER_PIXEL = 0.12
+
+
+# Bootstrap Secret Management (R-02)
+_bootstrap_lock = threading.Lock()
+_bootstrap_secrets: dict[str, dict[str, Any]] = {}
+BOOTSTRAP_SECRET_TTL = 30.0  # 30 seconds expiration
+
+
+def register_bootstrap_secret(secret: str, ttl: float = BOOTSTRAP_SECRET_TTL) -> None:
+    """Register a one-time single-use bootstrap secret."""
+    if not secret:
+        return
+    with _bootstrap_lock:
+        _bootstrap_secrets[secret] = {
+            "created_at": time.time(),
+            "ttl": ttl,
+            "consumed": False,
+        }
+
+
+def create_one_time_bootstrap_secret(ttl: float = BOOTSTRAP_SECRET_TTL) -> str:
+    """Generate and register a one-time single-use bootstrap secret."""
+    secret = secrets.token_hex(32)
+    register_bootstrap_secret(secret, ttl=ttl)
+    return secret
+
+
+def consume_bootstrap_secret(secret: str) -> bool:
+    """Validate and immediately consume a one-time bootstrap secret."""
+    if not secret or not isinstance(secret, str):
+        return False
+    now = time.time()
+    with _bootstrap_lock:
+        record = _bootstrap_secrets.get(secret)
+        if not record:
+            return False
+        if record["consumed"]:
+            return False
+        if now - record["created_at"] > record["ttl"]:
+            del _bootstrap_secrets[secret]
+            return False
+        record["consumed"] = True
+        return True
+
+
+# Register initial bootstrap secret from environment if present
+_initial_secret = os.getenv("AGRISCAN_BOOTSTRAP_SECRET")
+if _initial_secret:
+    register_bootstrap_secret(_initial_secret.strip())
 
 # Authentication secret management
 AUTH_TOKEN_FILE = DATA_DIR / ".auth_token"
@@ -74,9 +127,12 @@ async def verify_api_token(
     request: Request,
     x_agriscan_token: str | None = Header(None, alias="X-AgriScan-Token"),
     authorization: str | None = Header(None),
-    token: str | None = Query(None),
 ) -> str:
-    """Verify local API token on protected operations."""
+    """Verify local API token on protected operations.
+
+    Query-token (?token=...) authentication is strictly removed (R-02).
+    Only header tokens (X-AgriScan-Token / Bearer) or HttpOnly session cookie accepted.
+    """
     if os.getenv("AGRISCAN_DISABLE_AUTH_FOR_TESTS") == "1":
         return "test-bypass"
 
@@ -89,9 +145,6 @@ async def verify_api_token(
         bearer = authorization[len("Bearer "):].strip()
         if secrets.compare_digest(bearer, expected):
             return expected
-
-    if token and secrets.compare_digest(token.strip(), expected):
-        return expected
 
     cookie_token = request.cookies.get("agriscan_session")
     if cookie_token and secrets.compare_digest(cookie_token.strip(), expected):
@@ -215,12 +268,35 @@ def _mock_grains(ground_truth: dict) -> list[dict]:
     return grains
 
 
+def is_mock_mode_enabled() -> bool:
+    """Determine if mock mode is explicitly and safely permitted.
+
+    Mock mode is strictly OFF by default (R-07). It is only permitted when
+    AGRISCAN_ENV=development is explicitly configured AND MOCK=1.
+    If AGRISCAN_ENV=production, mock mode is strictly prohibited.
+    """
+    env = os.getenv("AGRISCAN_ENV", "").strip().lower()
+    mock_flag = os.getenv("MOCK", "0").strip().lower()
+    if mock_flag in ("1", "true", "yes"):
+        if env == "production":
+            raise HTTPException(
+                status_code=403,
+                detail="Security Violation: Mock simulation mode is strictly prohibited in production environments.",
+            )
+        if env != "development":
+            raise HTTPException(
+                status_code=403,
+                detail="Mock simulation mode requires explicit development environment (set AGRISCAN_ENV=development and MOCK=1).",
+            )
+        return True
+    return False
+
 def _make_mock_batch(request: ScanRequest) -> dict:
-    # Reject mock mode in production builds
-    if os.getenv("AGRISCAN_ENV", "development").lower() == "production":
+    # Enforce strict mock mode guard (R-07)
+    if not is_mock_mode_enabled():
         raise HTTPException(
             status_code=403,
-            detail="Mock simulation mode is disabled in production environments.",
+            detail="Mock simulation mode requires explicit development environment (set AGRISCAN_ENV=development and MOCK=1).",
         )
 
     batch_id, batch_dir = _create_batch_directory()
@@ -612,11 +688,15 @@ async def add_security_and_session_headers(request: Request, call_next):
         if request.client and request.client.host in ("127.0.0.1", "localhost", "::1", "testclient"):
             if "agriscan_session" not in request.cookies:
                 token = get_or_create_api_token()
+                is_secure = request.url.scheme == "https"
                 response.set_cookie(
                     key="agriscan_session",
                     value=token,
-                    httponly=False,
+                    httponly=True,
                     samesite="lax",
+                    secure=is_secure,
+                    path="/",
+                    max_age=86400,
                 )
     return response
 
@@ -630,14 +710,48 @@ def health() -> dict[str, Any]:
     return {"status": "ok", "service": "AgriScan Precision Optical Grain Assessment"}
 
 
-@app.get("/api/auth/token")
-def get_auth_token(request: Request) -> dict[str, str]:
-    """Retrieve session token for local browser client."""
-    client_ip = request.client.host if request.client else "unknown"
-    if client_ip not in ("127.0.0.1", "localhost", "::1", "testclient"):
-        raise HTTPException(status_code=403, detail="Token endpoint accessible only from local loopback.")
+class BootstrapRequest(BaseModel):
+    bootstrap_secret: str = Field(min_length=16, max_length=128)
+
+
+@app.post("/api/auth/bootstrap")
+def exchange_bootstrap_secret(req: BootstrapRequest, request: Request, response: Response):
+    """Exchange a single-use bootstrap secret for an authenticated session (R-02).
+
+    Prevents arbitrary loopback callers from obtaining tokens. Secret expires in 30s
+    and cannot be reused.
+    """
+    secret = req.bootstrap_secret.strip()
+    if not consume_bootstrap_secret(secret):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid, expired, or previously consumed bootstrap secret.",
+        )
+
     token = get_or_create_api_token()
-    return {"token": token, "status": "authenticated"}
+    is_secure = request.url.scheme == "https"
+    response.set_cookie(
+        key="agriscan_session",
+        value=token,
+        httponly=True,
+        samesite="lax",
+        secure=is_secure,
+        path="/",
+        max_age=86400,
+    )
+    return {"status": "authenticated", "token": token}
+
+
+@app.post("/api/auth/logout")
+def logout(response: Response):
+    """Terminate the authenticated session and clear the session cookie (R-02)."""
+    response.delete_cookie(
+        key="agriscan_session",
+        path="/",
+        httponly=True,
+        samesite="lax",
+    )
+    return {"status": "logged_out"}
 
 
 @app.post("/api/heartbeat")
@@ -666,17 +780,18 @@ def scan(
 ):
     check_rate_limit(req)
     try:
-        if os.getenv("MOCK", "0") == "1":
+        if is_mock_mode_enabled():
             return _make_mock_batch(request_data)
         return _make_real_batch(request_data)
     except HTTPException:
         raise
     except Exception as exc:
+        LOGGER.exception("Scan processing error: %s", exc)
         return JSONResponse(
             status_code=500,
             content={
                 "error": "scan_failed",
-                "detail": f"The simulated scan could not be completed: {exc}",
+                "detail": "The scan could not be completed. Please try again.",
             },
         )
 
@@ -735,11 +850,12 @@ async def scan_uploaded_photo(
     except HTTPException:
         raise
     except Exception as exc:
+        LOGGER.exception("Uploaded photo analysis error: %s", exc)
         return JSONResponse(
             status_code=500,
             content={
                 "error": "scan_failed",
-                "detail": f"The uploaded photo could not be analyzed: {exc}",
+                "detail": "The uploaded photo could not be analyzed. Please check the image and try again.",
             },
         )
     finally:
@@ -820,11 +936,13 @@ def export_batch(
 
 
 class ProtectedDataFilesApp(StaticFiles):
-    """Secure, contained file-serving app replacing public directory mount."""
+    """Secure, authenticated, narrowly scoped file-serving app (R-01)."""
 
+    ALLOWED_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp", ".json")
     BLOCKED_EXTENSIONS = (
         ".sqlite3", ".db", ".auth_token", ".py", ".pyc", ".joblib",
         ".env", ".key", ".pem", ".log", ".bat", ".cmd", ".ps1", ".sh",
+        ".webm", ".mp4", ".exe", ".dll", ".ini",
     )
 
     def __init__(self, directory: Path):
@@ -832,15 +950,86 @@ class ProtectedDataFilesApp(StaticFiles):
 
     async def get_response(self, path: str, scope):
         import urllib.parse
+        from starlette.requests import Request
+
+        # 1. Authenticate every /files request (R-01)
+        req = Request(scope)
+        if os.getenv("AGRISCAN_DISABLE_AUTH_FOR_TESTS") != "1":
+            expected = get_or_create_api_token()
+            token_header = req.headers.get("x-agriscan-token")
+            auth_header = req.headers.get("authorization")
+            cookie_token = req.cookies.get("agriscan_session")
+
+            authenticated = False
+            if token_header and secrets.compare_digest(token_header.strip(), expected):
+                authenticated = True
+            elif auth_header and auth_header.startswith("Bearer "):
+                bearer = auth_header[7:].strip()
+                if secrets.compare_digest(bearer, expected):
+                    authenticated = True
+            elif cookie_token and secrets.compare_digest(cookie_token.strip(), expected):
+                authenticated = True
+
+            if not authenticated:
+                return Response("Unauthorized", status_code=401)
+
+        # Dynamically follow DATA_DIR
+        self.directory = str(DATA_DIR)
+
+        raw_url_path = req.url.path
         decoded = urllib.parse.unquote(path)
-        # Strict directory traversal check
-        if ".." in path or "\\" in path or path.startswith("/") or ".." in decoded or "\\" in decoded or "\0" in decoded:
+
+        # 2. Strict traversal & encoding checks
+        if (
+            ".." in raw_url_path
+            or "\0" in decoded
+            or "\0" in path
+        ):
             return Response("Access Denied", status_code=403)
-        # Block protected database, credentials, and executable files
+
+        norm_parts = [p for p in decoded.replace("\\", "/").split("/") if p and p != "."]
+        if any(p == ".." or p.startswith("..") or ":" in p for p in norm_parts):
+            return Response("Access Denied", status_code=403)
+
         lower = decoded.lower()
         if lower.endswith(self.BLOCKED_EXTENSIONS):
             return Response("Access Denied", status_code=403)
-        return await super().get_response(path, scope)
+
+        # 3. Narrow scoping: only allow valid batch files (.jpg, .jpeg, .png, .webp, .json)
+        if not lower.endswith(self.ALLOWED_EXTENSIONS):
+            return Response("Not Found", status_code=404)
+
+        if len(norm_parts) < 2:
+            return Response("Not Found", status_code=404)
+
+        # 4. Containment and symlink escape verification
+        base_dir = Path(self.directory).resolve()
+        try:
+            target_path = (base_dir / Path(*norm_parts)).resolve()
+        except Exception:
+            return Response("Access Denied", status_code=403)
+
+        if not str(target_path).startswith(str(base_dir) + os.path.sep) and target_path != base_dir:
+            return Response("Access Denied", status_code=403)
+
+        if not target_path.is_file():
+            return Response("Not Found", status_code=404)
+
+        ext = target_path.suffix.lower()
+        media_type = {
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".png": "image/png",
+            ".webp": "image/webp",
+            ".json": "application/json",
+        }.get(ext, "application/octet-stream")
+
+        headers = {
+            "X-Content-Type-Options": "nosniff",
+            "X-Frame-Options": "DENY",
+            "Cache-Control": "private, max-age=86400",
+        }
+        return FileResponse(target_path, media_type=media_type, headers=headers)
 
 
 app.mount("/files", ProtectedDataFilesApp(directory=DATA_DIR), name="files")

@@ -25,7 +25,7 @@ namespace AgriScanSetup
 
         // Configurable expected SHA-256 checksum for agriscan_payload.zip
         // If empty or null, integrity verification uses embedded manifest or validates stream readable
-        public static string ExpectedPayloadSha256 = "";
+        public static string ExpectedPayloadSha256 = "F76C2CB201565ECFFD2967C449ADC53DA542AAF477C03CC61433B119DFB9FEE4";
 
         public SetupForm()
         {
@@ -340,13 +340,21 @@ namespace AgriScanSetup
                             computedHash = sb.ToString();
                         }
 
-                        // Verify integrity if expected hash is configured
-                        if (!string.IsNullOrEmpty(ExpectedPayloadSha256) &&
-                            !string.Equals(computedHash, ExpectedPayloadSha256, StringComparison.OrdinalIgnoreCase))
+                        // Fail-closed payload integrity verification (R-05)
+                        if (string.IsNullOrWhiteSpace(ExpectedPayloadSha256) ||
+                            ExpectedPayloadSha256.Trim().Length != 64 ||
+                            !System.Text.RegularExpressions.Regex.IsMatch(ExpectedPayloadSha256.Trim(), "^[0-9a-fA-F]{64}$"))
+                        {
+                            throw new SecurityException(
+                                "Installer integrity verification failed: Expected payload SHA-256 hash is unconfigured or invalid. Installation cannot proceed safely."
+                            );
+                        }
+
+                        if (!string.Equals(computedHash, ExpectedPayloadSha256.Trim(), StringComparison.OrdinalIgnoreCase))
                         {
                             throw new SecurityException(string.Format(
-                                "Payload integrity verification failed.\nExpected: {0}\nComputed: {1}",
-                                ExpectedPayloadSha256, computedHash
+                                "Security Alert: Payload integrity mismatch detected!\nExpected SHA-256: {0}\nComputed SHA-256: {1}\nThe installer package may be corrupted or tampered with. Installation aborted.",
+                                ExpectedPayloadSha256.Trim(), computedHash
                             ));
                         }
 

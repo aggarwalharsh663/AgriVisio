@@ -10,6 +10,6 @@
   "author": "AgriScan Precision Optics",
   "license": "Apache-2.0",
   "devDependencies": {
-    "electron": "^34.0.0"
+    "electron": "34.0.0"
   }
 }

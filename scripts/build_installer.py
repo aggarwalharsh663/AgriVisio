@@ -1,0 +1,123 @@
+"""AgriScan Windows Installer Build Script (R-05).
+
+Packages application components into an embedded payload ZIP, computes its
+cryptographic SHA-256 checksum, embeds the hash into setup_form.cs, and
+compiles the fail-closed AgriScanSetup.exe installer with csc.exe.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import os
+import re
+import subprocess
+import sys
+import tempfile
+import zipfile
+from pathlib import Path
+
+ROOT_DIR = Path(__file__).resolve().parent.parent
+CSC_EXE = Path(r"C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe")
+
+EXCLUDE_PATTERNS = [
+    ".venv",
+    "electron/dist",
+    "electron/node_modules",
+    "data/batches",
+    "data/validation_run",
+    "__pycache__",
+    ".pytest_cache",
+    ".git",
+    "agriscan.sqlite3",
+    "electron.log",
+]
+
+
+def compute_sha256(file_path: Path) -> str:
+    hasher = hashlib.sha256()
+    with open(file_path, "rb") as f:
+        while chunk := f.read(65536):
+            hasher.update(chunk)
+    return hasher.hexdigest().upper()
+
+
+def build_installer(output_exe: Path | None = None) -> Path:
+    out_target = output_exe or (ROOT_DIR / "AgriScanSetup.exe")
+    setup_cs = ROOT_DIR / "setup_form.cs"
+    icon_ico = ROOT_DIR / "app_icon.ico"
+
+    if not setup_cs.is_file():
+        raise FileNotFoundError(f"Missing setup source: {setup_cs}")
+
+    if not CSC_EXE.is_file():
+        raise FileNotFoundError(f"Missing C# compiler at {CSC_EXE}")
+
+    print("--- [1/4] Building installation payload ZIP ---")
+    tmp_payload = ROOT_DIR / "agriscan_payload.zip"
+
+    try:
+        with zipfile.ZipFile(tmp_payload, "w", zipfile.ZIP_DEFLATED) as zf:
+            for fname in ["AgriScan.bat", "AgriScan.exe", "app_icon.ico", "LICENSE", "README.md", "requirements.txt"]:
+                fpath = ROOT_DIR / fname
+                if fpath.is_file():
+                    zf.write(fpath, arcname=fname)
+
+            for dir_name in ["backend", "frontend", "electron"]:
+                src_dir = ROOT_DIR / dir_name
+                if not src_dir.is_dir():
+                    continue
+                for item in src_dir.rglob("*"):
+                    if item.is_file():
+                        rel = item.relative_to(ROOT_DIR)
+                        rel_str = str(rel).replace("\\", "/")
+                        if any(exc in rel_str for exc in EXCLUDE_PATTERNS):
+                            continue
+                        zf.write(item, arcname=str(rel))
+
+        payload_size_mb = tmp_payload.stat().st_size / (1024 * 1024)
+        print(f"Payload created: {payload_size_mb:.2f} MB")
+
+        print("--- [2/4] Computing SHA-256 checksum of exact payload ---")
+        payload_sha256 = compute_sha256(tmp_payload)
+        print(f"Computed Payload SHA-256: {payload_sha256}")
+
+        print("--- [3/4] Embedding SHA-256 into setup_form.cs ---")
+        cs_code = setup_cs.read_text(encoding="utf-8")
+        cs_code_updated = re.sub(
+            r'public static string ExpectedPayloadSha256\s*=\s*"[^"]*";',
+            f'public static string ExpectedPayloadSha256 = "{payload_sha256}";',
+            cs_code,
+        )
+        setup_cs.write_text(cs_code_updated, encoding="utf-8")
+
+        print(f"--- [4/4] Compiling {out_target.name} with csc.exe ---")
+        compile_cmd = [
+            str(CSC_EXE),
+            "/target:winexe",
+            f"/out:{out_target}",
+            f"/win32icon:{icon_ico}",
+            "/reference:System.IO.Compression.dll",
+            "/reference:System.IO.Compression.FileSystem.dll",
+            f"/resource:{tmp_payload},agriscan_payload.zip",
+            str(setup_cs),
+        ]
+
+        res = subprocess.run(compile_cmd, capture_output=True, text=True)
+        if res.returncode != 0:
+            print("Compilation STDERR:\n", res.stderr)
+            print("Compilation STDOUT:\n", res.stdout)
+            raise RuntimeError(f"C# compilation failed with code {res.returncode}")
+
+        print(f"Successfully compiled {out_target} ({out_target.stat().st_size / 1024:.1f} KB)")
+        print(f"Embedded payload SHA-256: {payload_sha256}")
+        return out_target
+    finally:
+        if tmp_payload.is_file():
+            try:
+                tmp_payload.unlink()
+            except OSError:
+                pass
+
+
+if __name__ == "__main__":
+    build_installer()

@@ -147,5 +147,5 @@ def test_scan_pipeline_failure_returns_clear_json_error(
     assert response.status_code == 500
     assert response.json() == {
         "error": "scan_failed",
-        "detail": "The simulated scan could not be completed: simulator disk write failed",
+        "detail": "The scan could not be completed. Please try again.",
     }

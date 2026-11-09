@@ -178,6 +178,12 @@ def handle_get_batch(data: dict) -> dict:
     return get_batch(batch_id)
 
 
+def handle_shutdown(data: dict) -> dict:
+    """Handle graceful shutdown requested by Electron parent process (R-06)."""
+    LOGGER.info("Graceful shutdown signal received from Electron parent.")
+    sys.exit(0)
+
+
 HANDLERS = {
     "health": handle_health,
     "heartbeat": handle_heartbeat,
@@ -186,6 +192,7 @@ HANDLERS = {
     "scan_hardware": handle_scan_hardware,
     "list_batches": handle_list_batches,
     "get_batch": handle_get_batch,
+    "shutdown": handle_shutdown,
 }
 
 
