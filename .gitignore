@@ -15,3 +15,6 @@ electron/dist/
 
 
 scratch/
+
+
+**/node_modules/
