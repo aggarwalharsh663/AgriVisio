@@ -121,7 +121,7 @@ All security controls operate under fail-closed principles, preserve existing ar
 ### Installer Build Verification
 - **Output Executable**: `AgriScanSetup.exe` (3,611,136 bytes / ~3,526.5 KB)
 - **Embedded Payload**: `agriscan_payload.zip` (3,456,234 bytes / ~3.30 MB)
-- **Payload SHA-256**: `2DD7E1E3F50EDC50900E09287E1B9BAF16F56D9CDEEF123630EFDCA15329D8D2`
+- **Payload SHA-256**: `D27EFCE32AF202472AA455781C53AB0EC8C8B7959913DB046399380BF5BF63B4`
 - **Compiler**: `C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe` (0 errors, 0 warnings)
 
 ### Comprehensive Test Suite Results
