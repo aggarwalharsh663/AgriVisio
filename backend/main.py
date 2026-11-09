@@ -599,6 +599,10 @@ app.add_middleware(
 @app.middleware("http")
 async def add_security_and_session_headers(request: Request, call_next):
     response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "SAMEORIGIN"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
     path = request.url.path
     if path == "/" or path.endswith((".html", ".css", ".js")):
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
@@ -808,24 +812,33 @@ def export_batch(
             status_code=400,
             detail="Mock batches cannot be exported as genuine grading certificates or measurement reports.",
         )
+    safe_batch_id = "".join(c for c in batch_id if c.isalnum() or c in "-_")
     return JSONResponse(
         content=batch,
-        headers={"Content-Disposition": f"attachment; filename=AgriScan-Report-{batch_id}.json"},
+        headers={"Content-Disposition": f'attachment; filename="AgriScan-Report-{safe_batch_id}.json"'},
     )
 
 
 class ProtectedDataFilesApp(StaticFiles):
     """Secure, contained file-serving app replacing public directory mount."""
 
+    BLOCKED_EXTENSIONS = (
+        ".sqlite3", ".db", ".auth_token", ".py", ".pyc", ".joblib",
+        ".env", ".key", ".pem", ".log", ".bat", ".cmd", ".ps1", ".sh",
+    )
+
     def __init__(self, directory: Path):
         super().__init__(directory=str(directory), check_dir=False)
 
     async def get_response(self, path: str, scope):
+        import urllib.parse
+        decoded = urllib.parse.unquote(path)
         # Strict directory traversal check
-        if ".." in path or "\\" in path or path.startswith("/"):
+        if ".." in path or "\\" in path or path.startswith("/") or ".." in decoded or "\\" in decoded or "\0" in decoded:
             return Response("Access Denied", status_code=403)
-        # Block protected database and credentials
-        if path.endswith((".sqlite3", ".db", ".auth_token", ".py", ".joblib")):
+        # Block protected database, credentials, and executable files
+        lower = decoded.lower()
+        if lower.endswith(self.BLOCKED_EXTENSIONS):
             return Response("Access Denied", status_code=403)
         return await super().get_response(path, scope)
 

@@ -226,3 +226,45 @@ def test_fingerprint_deterministic_and_tamper_evident():
     # Tamper sensitivity: changing raw image must change hash
     fp4 = compute_batch_fingerprint(counts, summary, calibration, b"altered_image_bytes")
     assert fp1["hash"] != fp4["hash"], "Fingerprint hash must change when image bytes differ"
+
+def test_security_headers_present(auth_client):
+    """Defense-in-depth security headers must be present on HTTP responses."""
+    res = auth_client.get("/api/health")
+    assert res.headers.get("x-content-type-options") == "nosniff"
+    assert res.headers.get("x-frame-options") == "SAMEORIGIN"
+    assert res.headers.get("referrer-policy") == "strict-origin-when-cross-origin"
+
+
+def test_export_filename_sanitization(auth_client):
+    """Batch export filename in Content-Disposition header must be sanitized."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        batch_dir = Path(tmpdir) / "batches" / "AS-TEST-EXPORT"
+        batch_dir.mkdir(parents=True)
+        record = {
+            "batch_id": "AS-TEST-EXPORT",
+            "is_mock": False,
+            "simulated": True,
+            "sample_name": "Test Real",
+            "variety": "IR64",
+            "created_at": "2026-01-01T00:00:00",
+            "grains": [],
+        }
+        (batch_dir / "batch.json").write_text(json.dumps(record), encoding="utf-8")
+
+        old_data_dir = backend_main.DATA_DIR
+        backend_main.DATA_DIR = Path(tmpdir)
+        try:
+            res = auth_client.get("/api/batches/AS-TEST-EXPORT/export")
+            assert res.status_code == 200
+            cd = res.headers.get("content-disposition", "")
+            assert 'filename="AgriScan-Report-AS-TEST-EXPORT.json"' in cd
+        finally:
+            backend_main.DATA_DIR = old_data_dir
+
+
+def test_static_files_blocks_sensitive_extensions(auth_client):
+    """Blocked file extensions must be rejected with 403."""
+    for ext in [".sqlite3", ".db", ".auth_token", ".py", ".pyc", ".joblib", ".env", ".key", ".log", ".bat"]:
+        res = auth_client.get(f"/files/test{ext}")
+        assert res.status_code == 403
+

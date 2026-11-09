@@ -615,7 +615,11 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      sandbox: true,
+      webSecurity: true,
+      allowRunningInsecureContent: false,
       spellcheck: false,
+      navigateOnDragDrop: false,
       preload: path.join(ELECTRON_DIR, 'preload.cjs'),
     },
   });
@@ -640,9 +644,26 @@ function createWindow() {
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('http://') || url.startsWith('https://')) {
       shell.openExternal(url);
-      return { action: 'deny' };
     }
-    return { action: 'allow' };
+    return { action: 'deny' };
+  });
+
+  mainWindow.webContents.on('will-navigate', (event, navigationUrl) => {
+    try {
+      const parsedUrl = new URL(navigationUrl);
+      if (parsedUrl.origin !== 'app://agriscan') {
+        event.preventDefault();
+        if (navigationUrl.startsWith('http://') || navigationUrl.startsWith('https://')) {
+          shell.openExternal(navigationUrl);
+        }
+      }
+    } catch (e) {
+      event.preventDefault();
+    }
+  });
+
+  mainWindow.webContents.on('will-attach-webview', (event) => {
+    event.preventDefault();
   });
 
   mainWindow.on('closed', () => {
@@ -657,7 +678,8 @@ ipcMain.handle('save-report-pdf', async (event, { batchId }) => {
   }
 
   try {
-    const defaultFilename = `AgriScan-Report-${batchId || 'summary'}.pdf`;
+    const safeBatchId = String(batchId || 'summary').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const defaultFilename = `AgriScan-Report-${safeBatchId}.pdf`;
     const { filePath, canceled } = await dialog.showSaveDialog(mainWindow, {
       title: 'Save AgriScan Assessment Report',
       defaultPath: path.join(app.getPath('downloads'), defaultFilename),

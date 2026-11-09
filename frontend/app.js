@@ -410,7 +410,8 @@
 		document.querySelector("#confusion-matrix").replaceChildren(table);
 		document.querySelector("#per-class-metrics").innerHTML = labels.map((label) => {
 			const valuesForClass = validation.per_class?.[label] || {};
-			const displayLabel = categories.find(({ key }) => key === label)?.label || label;
+			const rawLabel = categories.find(({ key }) => key === label)?.label || label;
+			const displayLabel = escapeHtml(rawLabel);
 			return `<div class="class-metric-row"><strong>${displayLabel}</strong><span>Precision <b>${(Number(valuesForClass.precision || 0) * 100).toFixed(0)}%</b></span><span>Recall <b>${(Number(valuesForClass.recall || 0) * 100).toFixed(0)}%</b></span></div>`;
 		}).join("");
 	}
