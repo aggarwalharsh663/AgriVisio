@@ -23,6 +23,7 @@ from backend.main import (
     _make_uploaded_batch,
     batches,
     get_batch,
+    is_mock_mode_enabled,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -39,7 +40,7 @@ def handle_heartbeat(data: dict) -> dict:
 
 def handle_scan(data: dict) -> dict:
     req = ScanRequest(**data)
-    if os.getenv("MOCK", "0") == "1":
+    if is_mock_mode_enabled():
         return _make_mock_batch(req)
     return _make_real_batch(req)
 

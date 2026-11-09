@@ -133,8 +133,6 @@ async def verify_api_token(
     Query-token (?token=...) authentication is strictly removed (R-02).
     Only header tokens (X-AgriScan-Token / Bearer) or HttpOnly session cookie accepted.
     """
-    if os.getenv("AGRISCAN_DISABLE_AUTH_FOR_TESTS") == "1":
-        return "test-bypass"
 
     expected = get_or_create_api_token()
 
@@ -167,8 +165,13 @@ def check_rate_limit(request: Request) -> None:
     client_ip = request.client.host if request.client else "127.0.0.1"
     now = time.time()
     with _rate_limit_lock:
-        history = _rate_limit_records.get(client_ip, [])
         cutoff = now - RATE_LIMIT_WINDOW_SECONDS
+        if len(_rate_limit_records) > 500:
+            stale_ips = [ip for ip, rec in _rate_limit_records.items() if not rec or rec[-1] <= cutoff]
+            for ip in stale_ips:
+                del _rate_limit_records[ip]
+
+        history = _rate_limit_records.get(client_ip, [])
         history = [t for t in history if t > cutoff]
         if len(history) >= RATE_LIMIT_MAX_REQUESTS:
             raise HTTPException(
@@ -954,24 +957,23 @@ class ProtectedDataFilesApp(StaticFiles):
 
         # 1. Authenticate every /files request (R-01)
         req = Request(scope)
-        if os.getenv("AGRISCAN_DISABLE_AUTH_FOR_TESTS") != "1":
-            expected = get_or_create_api_token()
-            token_header = req.headers.get("x-agriscan-token")
-            auth_header = req.headers.get("authorization")
-            cookie_token = req.cookies.get("agriscan_session")
+        expected = get_or_create_api_token()
+        token_header = req.headers.get("x-agriscan-token")
+        auth_header = req.headers.get("authorization")
+        cookie_token = req.cookies.get("agriscan_session")
 
-            authenticated = False
-            if token_header and secrets.compare_digest(token_header.strip(), expected):
+        authenticated = False
+        if token_header and secrets.compare_digest(token_header.strip(), expected):
+            authenticated = True
+        elif auth_header and auth_header.startswith("Bearer "):
+            bearer = auth_header[7:].strip()
+            if secrets.compare_digest(bearer, expected):
                 authenticated = True
-            elif auth_header and auth_header.startswith("Bearer "):
-                bearer = auth_header[7:].strip()
-                if secrets.compare_digest(bearer, expected):
-                    authenticated = True
-            elif cookie_token and secrets.compare_digest(cookie_token.strip(), expected):
-                authenticated = True
+        elif cookie_token and secrets.compare_digest(cookie_token.strip(), expected):
+            authenticated = True
 
-            if not authenticated:
-                return Response("Unauthorized", status_code=401)
+        if not authenticated:
+            return Response("Unauthorized", status_code=401)
 
         # Dynamically follow DATA_DIR
         self.directory = str(DATA_DIR)

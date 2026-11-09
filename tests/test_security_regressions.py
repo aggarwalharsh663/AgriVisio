@@ -502,3 +502,50 @@ def test_mock_mode_strictly_disabled_by_default(auth_client, monkeypatch):
     assert res_dev.status_code == 200
     assert res_dev.json().get("is_mock") is True
 
+
+
+# --- Additional Hardening & Quality Regressions ---
+
+def test_auth_bypass_env_var_strictly_ignored(unauth_client, monkeypatch):
+    """Ensure no environment variable backdoors can disable authentication."""
+    monkeypatch.setenv("AGRISCAN_DISABLE_AUTH_FOR_TESTS", "1")
+    res = unauth_client.post(
+        "/api/scan",
+        json={"lighting": "ring_light", "n_grains": 10, "seed": 42, "sample_name": "Test", "variety": "IR64"},
+    )
+    assert res.status_code == 401
+
+
+def test_frontend_escape_html_sanitizes_xss():
+    """Ensure escapeHtml is properly defined and present in frontend/app.js."""
+    app_js_path = Path(__file__).resolve().parent.parent / "frontend" / "app.js"
+    assert app_js_path.is_file()
+    js_text = app_js_path.read_text(encoding="utf-8")
+    assert "function escapeHtml(str)" in js_text
+    assert '.replace(/&/g, "&amp;")' in js_text
+    assert '.replace(/</g, "&lt;")' in js_text
+    assert '.replace(/>/g, "&gt;")' in js_text
+
+
+def test_electron_main_hardened_file_and_taskkill():
+    """Ensure electron/main.cjs has extension filtering, batch scoping, and safe taskkill."""
+    main_cjs_path = Path(__file__).resolve().parent.parent / "electron" / "main.cjs"
+    assert main_cjs_path.is_file()
+    cjs_text = main_cjs_path.read_text(encoding="utf-8")
+    assert "allowedExts = ['.jpg', '.jpeg', '.png', '.webp', '.json']" in cjs_text
+    assert "Unscoped batch file access" in cjs_text
+    assert "spawn('taskkill'" in cjs_text
+    assert "exec(`taskkill" not in cjs_text
+
+
+def test_ipc_worker_mock_mode_consistency(monkeypatch):
+    """Ensure ipc_worker handle_scan enforces is_mock_mode_enabled consistency."""
+    from backend.ipc_worker import handle_scan
+    from fastapi import HTTPException
+
+    # Production with MOCK=1 must raise HTTPException(403)
+    monkeypatch.setenv("AGRISCAN_ENV", "production")
+    monkeypatch.setenv("MOCK", "1")
+    with pytest.raises(HTTPException) as excinfo:
+        handle_scan({"lighting": "ring_light", "n_grains": 10, "seed": 42, "sample_name": "Test", "variety": "IR64"})
+    assert excinfo.value.status_code == 403

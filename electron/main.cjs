@@ -439,15 +439,29 @@ function registerProtocolHandler() {
         });
       }
 
-      // 8. Static uploaded media & batch files (/files/...)
+      // 8. Static uploaded media & batch files (/files/...) - hardened with extension whitelist and batch scoping
       if (pathname.startsWith('/files/')) {
         const rawRel = pathname.slice('/files/'.length);
+        const normRel = rawRel.replace(/^[\/\\]+/, '');
+        // Require batch directory scoping (batches/<batch_id>/... or AS-.../...)
+        if (!normRel.startsWith('batches/') && !/^AS-[\w-]+\//.test(normRel)) {
+          return new Response('Access Denied: Unscoped batch file access', { status: 403 });
+        }
+        const ext = path.extname(normRel).toLowerCase();
+        const allowedExts = ['.jpg', '.jpeg', '.png', '.webp', '.json'];
+        const blockedExts = [
+          '.sqlite3', '.db', '.auth_token', '.py', '.pyc', '.joblib',
+          '.env', '.key', '.pem', '.log', '.bat', '.cmd', '.ps1', '.sh',
+          '.webm', '.mp4', '.exe', '.dll', '.ini'
+        ];
+        if (!allowedExts.includes(ext) || blockedExts.includes(ext)) {
+          return new Response('Access Denied: Forbidden file type', { status: 403 });
+        }
         const resolvedPath = resolveContainedPath(DATA_DIR, rawRel);
         if (!resolvedPath) {
           return new Response('Access Denied', { status: 403 });
         }
         if (fs.existsSync(resolvedPath) && fs.statSync(resolvedPath).isFile()) {
-          const ext = path.extname(resolvedPath).toLowerCase();
           const contentType = mimeTypes[ext] || 'application/octet-stream';
           const fileData = fs.readFileSync(resolvedPath);
           return new Response(fileData, {
@@ -744,7 +758,7 @@ function stopBackend(callback) {
         log('Graceful shutdown timeout (3000ms) expired; terminating process forcibly.');
         try {
           if (process.platform === 'win32' && proc.pid) {
-            exec(`taskkill /pid ${proc.pid} /T /F`, () => {});
+            spawn('taskkill', ['/pid', String(proc.pid), '/T', '/F'], { windowsHide: true });
           } else {
             proc.kill('SIGKILL');
           }
