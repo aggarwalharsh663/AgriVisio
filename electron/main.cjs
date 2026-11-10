@@ -365,6 +365,13 @@ function registerProtocolHandler() {
         });
       }
 
+      // 1d. API: /api/auth/status (T-01)
+      if (pathname === '/api/auth/status') {
+        return new Response(JSON.stringify({ authenticated: Boolean(currentSessionToken) }), {
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+
       // 2. API: /api/heartbeat
       if (pathname === '/api/heartbeat') {
         const result = await sendIpcRequest('heartbeat', {});

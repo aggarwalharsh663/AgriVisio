@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f7f5ed">
+    <title>AgriScan - Authentication</title>
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
+    <link rel="icon" type="image/png" href="/assets/emblem.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@700;800;900&family=JetBrains+Mono:wght@500;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/style.css">
+    <style>
+      body.login-page-body {
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin: 0;
+        padding: 24px;
+        box-sizing: border-box;
+        background: var(--bg-body, #f7f5ed);
+        font-family: var(--font-body, "Inter", sans-serif);
+      }
+      .standalone-login-wrapper {
+        width: 100%;
+        max-width: 480px;
+      }
+    </style>
+  </head>
+  <body class="login-page-body">
+    <div class="standalone-login-wrapper">
+      <div class="login-card" role="main">
+        <div class="login-header">
+          <img src="/assets/emblem.png" alt="AgriScan" class="login-emblem">
+          <h1 class="login-title">AgriScan Authentication</h1>
+          <p class="login-subtitle">Enter the single-use bootstrap secret printed on the server console to access AgriScan in browser mode.</p>
+        </div>
+        <form id="standalone-login-form" class="login-form">
+          <div class="login-field">
+            <label for="bootstrap-secret" class="login-label">Bootstrap Secret</label>
+            <input
+              type="text"
+              id="bootstrap-secret"
+              class="login-input"
+              placeholder="e.g. 4a1e9c20..."
+              autocomplete="off"
+              spellcheck="false"
+              required
+              autofocus
+            >
+          </div>
+          <div id="standalone-login-error" class="login-error" style="display: none;" role="alert"></div>
+          <div class="login-actions">
+            <button type="submit" id="standalone-submit-btn" class="login-submit-btn">
+              <span id="btn-label">Authenticate Session</span>
+            </button>
+          </div>
+        </form>
+        <div class="login-help">
+          <p>The bootstrap secret is printed in your terminal where <code>uvicorn</code> or <code>python -m backend.main</code> was launched.</p>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      (async function() {
+        // Check if already authenticated
+        try {
+          const res = await fetch("/api/auth/status");
+          if (res.ok) {
+            const data = await res.json();
+            if (data && data.authenticated) {
+              window.location.replace("/");
+              return;
+            }
+          }
+        } catch (e) {}
+
+        const form = document.getElementById("standalone-login-form");
+        const secretInput = document.getElementById("bootstrap-secret");
+        const errorDiv = document.getElementById("standalone-login-error");
+        const submitBtn = document.getElementById("standalone-submit-btn");
+        const btnLabel = document.getElementById("btn-label");
+
+        // Parse query param ?bootstrap=... if present
+        const params = new URLSearchParams(window.location.search);
+        const urlSecret = params.get("bootstrap");
+        if (urlSecret) {
+          secretInput.value = urlSecret.trim();
+          // Clean secret from URL history immediately
+          const cleanUrl = window.location.pathname;
+          window.history.replaceState({}, document.title, cleanUrl);
+          // Auto submit
+          doAuthenticate(urlSecret.trim());
+        }
+
+        form.addEventListener("submit", function(e) {
+          e.preventDefault();
+          const secret = secretInput.value.trim();
+          if (!secret) return;
+          doAuthenticate(secret);
+        });
+
+        async function doAuthenticate(secret) {
+          errorDiv.style.display = "none";
+          submitBtn.disabled = true;
+          btnLabel.textContent = "Authenticating...";
+
+          try {
+            const resp = await fetch("/api/auth/bootstrap", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ bootstrap_secret: secret }),
+            });
+
+            if (resp.ok) {
+              btnLabel.textContent = "Success! Redirecting...";
+              window.location.replace("/");
+              return;
+            }
+
+            const err = await resp.json().catch(() => ({}));
+            showError(err.detail || "Authentication failed. The secret may be invalid, expired, or already used.");
+          } catch (err) {
+            showError("Network error connecting to AgriScan server.");
+          } finally {
+            submitBtn.disabled = false;
+            btnLabel.textContent = "Authenticate Session";
+          }
+        }
+
+        function showError(msg) {
+          errorDiv.textContent = msg;
+          errorDiv.style.display = "block";
+          secretInput.focus();
+          secretInput.select();
+        }
+      })();
+    </script>
+  </body>
+</html>

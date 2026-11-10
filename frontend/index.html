@@ -26,6 +26,40 @@
         <span class="splash-note">READY</span>
       </div>
     </div>
+
+    <!-- Login Modal (T-01 Browser Authentication) -->
+    <div id="login-modal" class="login-modal" aria-hidden="true" style="display: none;">
+      <div class="login-card" role="dialog" aria-labelledby="login-title" aria-modal="true">
+        <div class="login-header">
+          <img src="/assets/emblem.png" alt="AgriScan" class="login-emblem">
+          <h2 id="login-title" class="login-title">AgriScan Authentication</h2>
+          <p class="login-subtitle">Enter the single-use bootstrap secret printed on the server console to access AgriScan in browser mode.</p>
+        </div>
+        <form id="login-form" class="login-form" onsubmit="return false;">
+          <div class="login-field">
+            <label for="bootstrap-secret-input" class="login-label">Bootstrap Secret</label>
+            <input
+              type="text"
+              id="bootstrap-secret-input"
+              class="login-input"
+              placeholder="e.g. 4a1e9c20..."
+              autocomplete="off"
+              spellcheck="false"
+              required
+            >
+          </div>
+          <div id="login-error" class="login-error" style="display: none;" role="alert"></div>
+          <div class="login-actions">
+            <button type="submit" id="login-submit-btn" class="login-submit-btn">
+              <span class="btn-text">Authenticate Session</span>
+            </button>
+          </div>
+        </form>
+        <div class="login-help">
+          <p>The bootstrap secret is printed in your terminal where <code>uvicorn</code> or <code>python -m backend.main</code> was launched.</p>
+        </div>
+      </div>
+    </div>
     <div class="atmosphere" aria-hidden="true"></div>
 
     <header class="topbar">
@@ -41,6 +75,10 @@
         <button class="theme-toggle-btn" id="theme-toggle" type="button" aria-label="Toggle light and dark mode">
           <span class="toggle-icon">☀️</span>
           <span class="toggle-label">Light</span>
+        </button>
+        <button class="logout-btn" id="logout-btn" type="button" aria-label="Log out of session" style="display: none;">
+          <span class="logout-icon">🔒</span>
+          <span class="logout-label">Logout</span>
         </button>
       </div>
     </header>

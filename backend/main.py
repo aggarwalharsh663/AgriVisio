@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import json
 import os
@@ -51,14 +52,38 @@ UPLOAD_MAX_PIXELS = 20_000_000            # 20 Megapixel limit
 ESTIMATED_MM_PER_PIXEL = 0.12
 
 
-# Bootstrap Secret Management (R-02 / S-01 / S-02)
-_bootstrap_lock = threading.Lock()
+# Bootstrap Secret Management (R-02 / S-01 / S-02 / T-01)
+_bootstrap_lock = threading.RLock()
 _bootstrap_secrets: dict[str, dict[str, Any]] = {}
-BOOTSTRAP_SECRET_TTL = 30.0  # 30 seconds expiration
+BOOTSTRAP_SECRET_TTL = float(os.getenv("AGRISCAN_BOOTSTRAP_TTL", "300.0"))  # Default 300s (5m) for browser mode
+_last_console_printed_secret: str | None = None
 
 
-def _purge_expired_secrets_locked(now: float | None = None) -> None:
-    """Purge expired and consumed secrets from in-memory store (Additional 3)."""
+def print_bootstrap_banner(secret: str, ttl: float = BOOTSTRAP_SECRET_TTL, reason: str = "") -> None:
+    """Print the single-use bootstrap secret and direct URL to the server console (T-01)."""
+    host = os.getenv("AGRISCAN_HOST", "127.0.0.1")
+    port = os.getenv("AGRISCAN_PORT", "8000")
+    url = f"http://{host}:{port}/?bootstrap={secret}"
+    banner = [
+        "",
+        "=" * 70,
+        " AGRISCAN BROWSER AUTHENTICATION (T-01)",
+        "=" * 70,
+        f" One-time bootstrap secret: {secret}",
+        f" Direct login URL:          {url}",
+        f" Valid for {int(ttl)}s (single-use, auto-refreshed upon expiry/use).",
+        "=" * 70,
+        "",
+    ]
+    print("\n".join(banner), flush=True)
+    if reason:
+        LOGGER.info("Bootstrap secret refreshed (%s).", reason)
+    else:
+        LOGGER.info("Bootstrap secret initialized.")
+
+
+def _purge_expired_secrets_locked(now: float | None = None) -> list[str]:
+    """Purge expired and consumed secrets from in-memory store (Additional 3 / T-01)."""
     current = now if now is not None else time.time()
     stale_keys = [
         k for k, rec in _bootstrap_secrets.items()
@@ -66,6 +91,46 @@ def _purge_expired_secrets_locked(now: float | None = None) -> None:
     ]
     for k in stale_keys:
         del _bootstrap_secrets[k]
+    return stale_keys
+
+
+def _get_active_bootstrap_secret_locked(now: float | None = None) -> tuple[str, float] | None:
+    """Internal unlocked search for active secret; caller must hold _bootstrap_lock."""
+    current = now if now is not None else time.time()
+    _purge_expired_secrets_locked(current)
+    for secret, rec in _bootstrap_secrets.items():
+        if not rec.get("consumed"):
+            remaining = rec.get("ttl", BOOTSTRAP_SECRET_TTL) - (current - rec.get("created_at", 0))
+            if remaining > 0:
+                return secret, remaining
+    return None
+
+
+def get_active_bootstrap_secret(now: float | None = None) -> tuple[str, float] | None:
+    """Return an active unexpired, unconsumed secret and its remaining TTL, if any."""
+    with _bootstrap_lock:
+        return _get_active_bootstrap_secret_locked(now)
+
+
+def ensure_active_bootstrap_secret(ttl: float = BOOTSTRAP_SECRET_TTL, print_console: bool = True, force_print: bool = False, reason: str = "") -> str:
+    """Ensure at least one valid, unexpired bootstrap secret exists; if not, generate, register and print fresh (T-01)."""
+    global _last_console_printed_secret
+    now = time.time()
+    with _bootstrap_lock:
+        active = _get_active_bootstrap_secret_locked(now)
+        if active is not None:
+            secret = active[0]
+        else:
+            secret = secrets.token_hex(32)
+            _bootstrap_secrets[secret] = {
+                "created_at": now,
+                "ttl": float(ttl),
+                "consumed": False,
+            }
+    if print_console and (force_print or secret != _last_console_printed_secret):
+        _last_console_printed_secret = secret
+        print_bootstrap_banner(secret, ttl=ttl, reason=reason)
+    return secret
 
 
 def register_bootstrap_secret(secret: str, ttl: float = BOOTSTRAP_SECRET_TTL) -> None:
@@ -89,25 +154,33 @@ def create_one_time_bootstrap_secret(ttl: float = BOOTSTRAP_SECRET_TTL) -> str:
 
 
 def consume_bootstrap_secret(secret: str) -> bool:
-    """Validate and atomically consume a one-time bootstrap secret (S-01 / Additional 3)."""
+    """Validate and atomically consume a one-time bootstrap secret (S-01 / Additional 3 / T-01)."""
     if not secret or not isinstance(secret, str):
         return False
     now = time.time()
+    clean_secret = secret.strip()
+    consumed_ok = False
     with _bootstrap_lock:
         _purge_expired_secrets_locked(now)
-        clean_secret = secret.strip()
         record = _bootstrap_secrets.get(clean_secret)
-        if not record:
-            return False
-        if record.get("consumed"):
+        if not record or record.get("consumed"):
             return False
         if now - record.get("created_at", 0) > record.get("ttl", BOOTSTRAP_SECRET_TTL):
             del _bootstrap_secrets[clean_secret]
-            return False
-        # Atomically consume and purge to prevent any replay
-        record["consumed"] = True
-        del _bootstrap_secrets[clean_secret]
+            consumed_ok = False
+        else:
+            # Atomically consume and purge to prevent any replay
+            record["consumed"] = True
+            del _bootstrap_secrets[clean_secret]
+            consumed_ok = True
+
+    # Re-register a fresh secret whenever the current one is consumed or expired (T-01)
+    if consumed_ok:
+        ensure_active_bootstrap_secret(print_console=True, reason="previous secret consumed")
         return True
+    else:
+        ensure_active_bootstrap_secret(print_console=True, reason="previous secret expired")
+        return False
 
 
 # Register initial bootstrap secret from environment if present
@@ -666,7 +739,40 @@ async def lifespan(app: FastAPI):
         _load_model()
     except Exception:
         pass
-    yield
+
+    # Print a fresh, one-time bootstrap URL or secret to server console at startup (T-01)
+    ensure_active_bootstrap_secret(print_console=True, reason="server startup")
+
+    stop_event = asyncio.Event()
+
+    async def _auto_refresh_loop():
+        while not stop_event.is_set():
+            try:
+                try:
+                    await asyncio.wait_for(stop_event.wait(), timeout=2.0)
+                    break
+                except asyncio.TimeoutError:
+                    pass
+                if stop_event.is_set():
+                    break
+                active = get_active_bootstrap_secret()
+                if active is None:
+                    ensure_active_bootstrap_secret(print_console=True, reason="previous secret expired")
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                pass
+
+    loop_task = asyncio.create_task(_auto_refresh_loop())
+    try:
+        yield
+    finally:
+        stop_event.set()
+        loop_task.cancel()
+        try:
+            await loop_task
+        except (asyncio.CancelledError, Exception):
+            pass
 
 
 app = FastAPI(title="AgriScan - Precision Optical Grain Assessment", lifespan=lifespan)
@@ -748,6 +854,23 @@ def exchange_bootstrap_secret(req: BootstrapRequest, request: Request, response:
     )
     # S-01 / S-02: Never disclose the master token in HTTP response bodies
     return {"status": "authenticated"}
+
+
+@app.get("/api/auth/status")
+def auth_status(request: Request):
+    """Check whether the current caller possesses a valid authenticated session (T-01)."""
+    expected = get_or_create_api_token()
+    cookie_token = request.cookies.get("agriscan_session")
+    if cookie_token and secrets.compare_digest(cookie_token.strip(), expected):
+        return {"authenticated": True}
+    token_header = request.headers.get("x-agriscan-token")
+    if token_header and secrets.compare_digest(token_header.strip(), expected):
+        return {"authenticated": True}
+    auth_header = request.headers.get("authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        if secrets.compare_digest(auth_header[7:].strip(), expected):
+            return {"authenticated": True}
+    return {"authenticated": False}
 
 
 @app.post("/api/auth/logout")

@@ -657,3 +657,107 @@ def test_additional_3_expired_and_consumed_bootstrap_secrets_purged():
     # Consuming sec2 removes it atomically
     assert backend_main.consume_bootstrap_secret(sec2) is True
     assert sec2 not in backend_main._bootstrap_secrets
+
+
+# --- T-01: Browser Mode Authentication & Console Bootstrap (Step 1) ---
+
+def test_t01_startup_bootstrap_secret_and_console_banner(capsys):
+    """Ensure ensure_active_bootstrap_secret generates a valid secret and prints direct login URL (T-01)."""
+    secret = backend_main.ensure_active_bootstrap_secret(ttl=300.0, print_console=True, force_print=True)
+    assert secret and isinstance(secret, str)
+    assert len(secret) >= 32
+    captured = capsys.readouterr()
+    assert "AGRISCAN BROWSER AUTHENTICATION (T-01)" in captured.out
+    assert secret in captured.out
+    assert f"?bootstrap={secret}" in captured.out
+
+
+def test_t01_bootstrap_secret_auto_refresh_on_consumption():
+    """Backend must re-register a fresh secret whenever the current one is consumed (T-01)."""
+    active = backend_main.get_active_bootstrap_secret()
+    if not active:
+        secret = backend_main.ensure_active_bootstrap_secret()
+    else:
+        secret = active[0]
+
+    # Consuming the current secret
+    consumed = backend_main.consume_bootstrap_secret(secret)
+    assert consumed is True
+
+    # A fresh active secret must have been immediately re-registered
+    fresh_active = backend_main.get_active_bootstrap_secret()
+    assert fresh_active is not None
+    fresh_secret, remaining_ttl = fresh_active
+    assert fresh_secret != secret
+    assert remaining_ttl > 0
+
+
+def test_t01_bootstrap_secret_auto_refresh_on_expiration():
+    """Backend must generate a fresh secret when the current secret expires (T-01)."""
+    # Register an immediately expired secret
+    short_secret = "expired_secret_for_test_refresh_12345"
+    backend_main.register_bootstrap_secret(short_secret, ttl=0.001)
+    import time
+    time.sleep(0.01)
+
+    # Calling ensure_active_bootstrap_secret must detect expiration, purge it, and return a fresh secret
+    fresh_secret = backend_main.ensure_active_bootstrap_secret(ttl=300.0, print_console=False)
+    assert fresh_secret != short_secret
+    assert short_secret not in backend_main._bootstrap_secrets
+    assert fresh_secret in backend_main._bootstrap_secrets
+
+
+def test_t01_auth_status_endpoint(unauth_client, auth_client):
+    """GET /api/auth/status returns authenticated boolean without leaking any credentials (T-01)."""
+    # Unauthenticated caller
+    res_unauth = unauth_client.get("/api/auth/status")
+    assert res_unauth.status_code == 200
+    assert res_unauth.json() == {"authenticated": False}
+    assert "token" not in res_unauth.json()
+
+    # Authenticated caller with header
+    res_auth = auth_client.get("/api/auth/status")
+    assert res_auth.status_code == 200
+    assert res_auth.json() == {"authenticated": True}
+    assert "token" not in res_auth.json()
+
+    # Authenticated caller with session cookie
+    token = backend_main.get_or_create_api_token()
+    cookie_client = TestClient(backend_main.app, cookies={"agriscan_session": token})
+    res_cookie = cookie_client.get("/api/auth/status")
+    assert res_cookie.status_code == 200
+    assert res_cookie.json() == {"authenticated": True}
+
+
+def test_t01_browser_bootstrap_login_flow(unauth_client):
+    """Full browser login workflow: static files have no cookies -> exchange secret -> session valid -> logout (T-01)."""
+    # 1. Unauthenticated GET / and /login.html never issue session cookies (S-01 preserved)
+    res_root = unauth_client.get("/")
+    assert res_root.status_code == 200
+    assert "agriscan_session" not in res_root.cookies
+    assert "agriscan_session" not in res_root.headers.get("set-cookie", "")
+
+    res_login_page = unauth_client.get("/login.html")
+    assert res_login_page.status_code == 200
+    assert "agriscan_session" not in res_login_page.cookies
+
+    # 2. Status is unauthenticated
+    assert unauth_client.get("/api/auth/status").json() == {"authenticated": False}
+
+    # 3. Exchange active secret
+    secret = backend_main.ensure_active_bootstrap_secret()
+    res_boot = unauth_client.post("/api/auth/bootstrap", json={"bootstrap_secret": secret})
+    assert res_boot.status_code == 200
+    assert res_boot.json() == {"status": "authenticated"}
+    assert "agriscan_session" in unauth_client.cookies
+
+    # 4. Status is now authenticated
+    assert unauth_client.get("/api/auth/status").json() == {"authenticated": True}
+
+    # 5. Protected API works
+    assert unauth_client.get("/api/batches").status_code == 200
+
+    # 6. Logout
+    res_logout = unauth_client.post("/api/auth/logout")
+    assert res_logout.status_code == 200
+    assert unauth_client.get("/api/auth/status").json() == {"authenticated": False}

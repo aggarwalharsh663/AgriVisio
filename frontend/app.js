@@ -893,6 +893,10 @@
 				};
 			}
 			let response = await fetch(endpoint, requestOptions);
+			if (response.status === 401) {
+				showLoginModal();
+				throw new Error("Session expired or unauthenticated. Please re-authenticate.");
+			}
 			let result = await response.json().catch(() => ({}));
 			if (scanningHardware && !response.ok && result.error === "scanner_not_found") {
 				setLoading(false);
@@ -971,6 +975,124 @@
 		}
 	}
 
+	// Authentication handling (T-01)
+	const loginModal = document.querySelector("#login-modal");
+	const loginForm = document.querySelector("#login-form");
+	const secretInput = document.querySelector("#bootstrap-secret-input");
+	const loginError = document.querySelector("#login-error");
+	const loginBtn = document.querySelector("#login-submit-btn");
+	const logoutBtn = document.querySelector("#logout-btn");
+
+	function showLoginModal() {
+		if (loginModal) {
+			loginModal.style.display = "flex";
+			loginModal.setAttribute("aria-hidden", "false");
+			if (secretInput) {
+				secretInput.focus();
+			}
+		}
+		if (logoutBtn) logoutBtn.style.display = "none";
+	}
+
+	function hideLoginModal() {
+		if (loginModal) {
+			loginModal.style.display = "none";
+			loginModal.setAttribute("aria-hidden", "true");
+		}
+		if (logoutBtn) logoutBtn.style.display = "inline-flex";
+	}
+
+	async function checkAuthStatus() {
+		try {
+			const res = await fetch("/api/auth/status");
+			if (res.ok) {
+				const data = await res.json();
+				if (data && data.authenticated) {
+					hideLoginModal();
+					return true;
+				}
+			}
+		} catch (e) {}
+		showLoginModal();
+		return false;
+	}
+
+	async function exchangeBootstrap(secret) {
+		if (!secret) return false;
+		if (loginError) loginError.style.display = "none";
+		if (loginBtn) {
+			loginBtn.disabled = true;
+			const textSpan = loginBtn.querySelector(".btn-text");
+			if (textSpan) textSpan.textContent = "Authenticating...";
+		}
+		try {
+			const resp = await fetch("/api/auth/bootstrap", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ bootstrap_secret: secret }),
+			});
+			if (resp.ok) {
+				hideLoginModal();
+				if (secretInput) secretInput.value = "";
+				return true;
+			}
+			const err = await resp.json().catch(() => ({}));
+			const msg = err.detail || "Authentication failed. The secret may be invalid, expired, or already consumed.";
+			if (loginError) {
+				loginError.textContent = msg;
+				loginError.style.display = "block";
+			}
+			showLoginModal();
+		} catch (e) {
+			if (loginError) {
+				loginError.textContent = "Network error connecting to AgriScan server.";
+				loginError.style.display = "block";
+			}
+			showLoginModal();
+		} finally {
+			if (loginBtn) {
+				loginBtn.disabled = false;
+				const textSpan = loginBtn.querySelector(".btn-text");
+				if (textSpan) textSpan.textContent = "Authenticate Session";
+			}
+		}
+		return false;
+	}
+
+	async function doLogout() {
+		try {
+			await fetch("/api/auth/logout", { method: "POST" });
+		} catch (e) {}
+		showLoginModal();
+	}
+
+	async function initAuth() {
+		if (loginForm) {
+			loginForm.addEventListener("submit", async (e) => {
+				e.preventDefault();
+				const val = secretInput ? secretInput.value.trim() : "";
+				if (val) await exchangeBootstrap(val);
+			});
+		}
+		if (logoutBtn) {
+			logoutBtn.addEventListener("click", doLogout);
+		}
+
+		// Handle ?bootstrap= query parameter in URL
+		const urlParams = new URLSearchParams(window.location.search);
+		const bootstrapParam = urlParams.get("bootstrap");
+		if (bootstrapParam) {
+			const cleanUrl = window.location.pathname;
+			window.history.replaceState({}, document.title, cleanUrl);
+			if (secretInput) secretInput.value = bootstrapParam.trim();
+			const success = await exchangeBootstrap(bootstrapParam.trim());
+			if (success) return;
+		}
+
+		await checkAuthStatus();
+	}
+
+	initAuth();
 	initTheme();
 	// Default to scanner mode
 	scanSource.value = "scanner";

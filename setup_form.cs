@@ -25,7 +25,7 @@ namespace AgriScanSetup
 
         // Configurable expected SHA-256 checksum for agriscan_payload.zip
         // If empty or null, integrity verification uses embedded manifest or validates stream readable
-        public static string ExpectedPayloadSha256 = "D27EFCE32AF202472AA455781C53AB0EC8C8B7959913DB046399380BF5BF63B4";
+        public static string ExpectedPayloadSha256 = "B1E93D570E09056B4E73B2FB98AADFD1F85F6327730ED0376F1079452ABAC17E";
 
                 /// <summary>
         /// Constant-time comparison of two hex hash strings to prevent timing side-channels (S-03).
