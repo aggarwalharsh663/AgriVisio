@@ -843,3 +843,44 @@ def test_s05_get_batch_corrupt_json_returns_clean_404_not_500(auth_client, tmp_p
         res = auth_client.get(f"/api/batches/{bid}")
         assert res.status_code == 404, f"Expected 404 for {bid}, got {res.status_code}: {res.text}"
         assert res.json() == {"detail": "Batch not found"}
+
+
+# --- S-06: Wildcard CORS Override Hardening (Step 3) ---
+
+def test_s06_cors_wildcard_strictly_rejected_with_logging(caplog):
+    """parse_and_validate_allowed_origins must outright reject wildcard '*' with loud error logging (S-06)."""
+    import logging
+
+    with caplog.at_level(logging.ERROR, logger="agriscan"):
+        origins = backend_main.parse_and_validate_allowed_origins("*, https://evil.com/*, *evil.com")
+        assert "*" not in origins
+        assert "https://evil.com/*" not in origins
+        assert "*evil.com" not in origins
+        # Confirms loud error logging was triggered
+        assert any("rejected wildcard origin" in record.message for record in caplog.records)
+
+
+def test_s06_cors_filters_empty_and_duplicate_origins(caplog):
+    """parse_and_validate_allowed_origins must drop empty values and duplicates (S-06)."""
+    import logging
+
+    raw = "http://localhost:8000, , https://farm.local, http://localhost:8000, https://farm.local, "
+    with caplog.at_level(logging.INFO, logger="agriscan"):
+        origins = backend_main.parse_and_validate_allowed_origins(raw)
+        # Empty string not present
+        assert "" not in origins
+        # No duplicates
+        assert origins.count("http://localhost:8000") == 1
+        assert origins.count("https://farm.local") == 1
+        assert "https://farm.local" in origins
+
+
+def test_s06_cors_rejects_schemeless_origins_with_logging(caplog):
+    """parse_and_validate_allowed_origins must reject schemeless origins with loud logging (S-06)."""
+    import logging
+
+    with caplog.at_level(logging.ERROR, logger="agriscan"):
+        origins = backend_main.parse_and_validate_allowed_origins("attacker.com, evil.org")
+        assert "attacker.com" not in origins
+        assert "evil.org" not in origins
+        assert any("rejected invalid origin" in record.message for record in caplog.records)

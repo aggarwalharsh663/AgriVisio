@@ -743,6 +743,11 @@ async def lifespan(app: FastAPI):
     # Print a fresh, one-time bootstrap URL or secret to server console at startup (T-01)
     ensure_active_bootstrap_secret(print_console=True, reason="server startup")
 
+    # Validate custom CORS configuration at startup (S-06)
+    raw_cors = os.getenv("AGRISCAN_ALLOWED_ORIGINS")
+    if raw_cors:
+        parse_and_validate_allowed_origins(raw_cors)
+
     stop_event = asyncio.Event()
 
     async def _auto_refresh_loop():
@@ -777,17 +782,56 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="AgriScan - Precision Optical Grain Assessment", lifespan=lifespan)
 
-# Restrict CORS to trusted local origins
-trusted_origins = [
+# Restrict CORS to trusted local origins (S-06)
+DEFAULT_TRUSTED_ORIGINS = [
     "http://127.0.0.1:8000",
     "http://localhost:8000",
     "http://127.0.0.1",
     "http://localhost",
     "app://agriscan",
 ]
-custom_origins = os.getenv("AGRISCAN_ALLOWED_ORIGINS", "")
-if custom_origins:
-    trusted_origins.extend(o.strip() for o in custom_origins.split(",") if o.strip())
+
+
+def parse_and_validate_allowed_origins(raw_origins: str | None = None) -> list[str]:
+    """Parse, validate, and filter custom CORS origins from AGRISCAN_ALLOWED_ORIGINS (S-06).
+
+    - Outright rejects wildcard '*' or any wildcard patterns to prevent arbitrary cross-origin access.
+    - Drops empty values and duplicate origins.
+    - Fails loudly with logging when invalid or wildcard values are supplied.
+    """
+    raw = raw_origins if raw_origins is not None else os.getenv("AGRISCAN_ALLOWED_ORIGINS", "")
+    trusted = list(DEFAULT_TRUSTED_ORIGINS)
+    seen = set(trusted)
+
+    if raw:
+        for item in raw.split(","):
+            clean = item.strip()
+            if not clean:
+                continue
+            if clean == "*" or "*" in clean:
+                LOGGER.error(
+                    "CORS configuration error: rejected wildcard origin '%s' in AGRISCAN_ALLOWED_ORIGINS. "
+                    "Wildcard CORS origins are strictly prohibited to prevent cross-origin data theft.",
+                    clean,
+                )
+                continue
+            if not (clean.startswith("http://") or clean.startswith("https://") or clean.startswith("app://")):
+                LOGGER.error(
+                    "CORS configuration error: rejected invalid origin '%s' in AGRISCAN_ALLOWED_ORIGINS. "
+                    "Origins must specify protocol (http://, https://, or app://).",
+                    clean,
+                )
+                continue
+            if clean in seen:
+                LOGGER.info("Dropped duplicate CORS origin: %s", clean)
+                continue
+            seen.add(clean)
+            trusted.append(clean)
+            LOGGER.info("Configured custom CORS allowed origin: %s", clean)
+    return trusted
+
+
+trusted_origins = parse_and_validate_allowed_origins()
 
 app.add_middleware(
     CORSMiddleware,
