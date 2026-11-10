@@ -193,13 +193,18 @@ AUTH_TOKEN_FILE = DATA_DIR / ".auth_token"
 
 
 def get_or_create_api_token() -> str:
-    """Retrieve or generate secure authentication token."""
+    """Retrieve or generate secure authentication token (S-07)."""
     env_token = os.getenv("AGRISCAN_API_TOKEN")
     if env_token:
         return env_token.strip()
-    if AUTH_TOKEN_FILE.is_file():
+    path = AUTH_TOKEN_FILE
+    if path.is_file():
         try:
-            stored = AUTH_TOKEN_FILE.read_text(encoding="utf-8").strip()
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+        try:
+            stored = path.read_text(encoding="utf-8").strip()
             if stored:
                 return stored
         except OSError:
@@ -207,7 +212,11 @@ def get_or_create_api_token() -> str:
     token = secrets.token_hex(32)
     try:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
-        AUTH_TOKEN_FILE.write_text(token, encoding="utf-8")
+        path.write_text(token, encoding="utf-8")
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
     except OSError:
         pass
     return token

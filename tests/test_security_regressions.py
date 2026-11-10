@@ -884,3 +884,59 @@ def test_s06_cors_rejects_schemeless_origins_with_logging(caplog):
         assert "attacker.com" not in origins
         assert "evil.org" not in origins
         assert any("rejected invalid origin" in record.message for record in caplog.records)
+
+
+# --- S-07: Token File Permissions (Step 4) ---
+
+def test_s07_token_file_permissions_enforced_on_write(tmp_path, monkeypatch):
+    """get_or_create_api_token must chmod 0o600 on newly created .auth_token file (S-07)."""
+    fake_data = tmp_path / "data"
+    fake_token_file = fake_data / ".auth_token"
+    monkeypatch.setattr(backend_main, "DATA_DIR", fake_data)
+    monkeypatch.setattr(backend_main, "AUTH_TOKEN_FILE", fake_token_file)
+    monkeypatch.delenv("AGRISCAN_API_TOKEN", raising=False)
+
+    chmod_calls = []
+    real_chmod = os.chmod
+
+    def spy_chmod(p, mode):
+        chmod_calls.append((Path(p).resolve(), mode))
+        return real_chmod(p, mode)
+
+    monkeypatch.setattr(os, "chmod", spy_chmod)
+
+    token = backend_main.get_or_create_api_token()
+    assert token and len(token) == 64
+    assert fake_token_file.is_file()
+    assert fake_token_file.read_text(encoding="utf-8").strip() == token
+
+    # Verify os.chmod was called with 0o600 (owner read/write only)
+    assert any(c[0] == fake_token_file.resolve() and c[1] == 0o600 for c in chmod_calls)
+
+
+def test_s07_token_file_permissions_repaired_on_read(tmp_path, monkeypatch):
+    """get_or_create_api_token must chmod 0o600 on existing .auth_token file to repair legacy permissions (S-07)."""
+    fake_data = tmp_path / "data"
+    fake_data.mkdir(parents=True)
+    fake_token_file = fake_data / ".auth_token"
+    existing_token = "existing_secret_token_value_0123456789abcdef"
+    fake_token_file.write_text(existing_token, encoding="utf-8")
+
+    monkeypatch.setattr(backend_main, "DATA_DIR", fake_data)
+    monkeypatch.setattr(backend_main, "AUTH_TOKEN_FILE", fake_token_file)
+    monkeypatch.delenv("AGRISCAN_API_TOKEN", raising=False)
+
+    chmod_calls = []
+    real_chmod = os.chmod
+
+    def spy_chmod(p, mode):
+        chmod_calls.append((Path(p).resolve(), mode))
+        return real_chmod(p, mode)
+
+    monkeypatch.setattr(os, "chmod", spy_chmod)
+
+    retrieved = backend_main.get_or_create_api_token()
+    assert retrieved == existing_token
+
+    # Verify os.chmod was called with 0o600 to repair existing file
+    assert any(c[0] == fake_token_file.resolve() and c[1] == 0o600 for c in chmod_calls)
