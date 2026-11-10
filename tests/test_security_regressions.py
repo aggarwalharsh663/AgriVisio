@@ -761,3 +761,85 @@ def test_t01_browser_bootstrap_login_flow(unauth_client):
     res_logout = unauth_client.post("/api/auth/logout")
     assert res_logout.status_code == 200
     assert unauth_client.get("/api/auth/status").json() == {"authenticated": False}
+
+
+# --- S-05: Malformed batch.json Handling (Step 2) ---
+
+def test_s05_sorted_batch_list_ignores_corrupt_or_incomplete_batch_json(tmp_path, monkeypatch):
+    """_get_sorted_batch_list must skip malformed, corrupt, or missing-field batch files without crashing (S-05)."""
+    data_dir = tmp_path / "data"
+    batches_dir = data_dir / "batches"
+    batches_dir.mkdir(parents=True)
+
+    # 1. Valid batch
+    valid_dir = batches_dir / "AS-20261110-001"
+    valid_dir.mkdir()
+    (valid_dir / "batch.json").write_text(
+        json.dumps({"batch_id": "AS-20261110-001", "created_at": "2026-11-10T10:00:00"}),
+        encoding="utf-8",
+    )
+
+    # 2. Corrupted JSON file (syntax error)
+    corrupt_dir = batches_dir / "AS-20261110-002"
+    corrupt_dir.mkdir()
+    (corrupt_dir / "batch.json").write_text("{broken-json: true", encoding="utf-8")
+
+    # 3. Empty dictionary (missing batch_id and created_at)
+    empty_dir = batches_dir / "AS-20261110-003"
+    empty_dir.mkdir()
+    (empty_dir / "batch.json").write_text("{}", encoding="utf-8")
+
+    # 4. Missing created_at field
+    no_date_dir = batches_dir / "AS-20261110-004"
+    no_date_dir.mkdir()
+    (no_date_dir / "batch.json").write_text(
+        json.dumps({"batch_id": "AS-20261110-004"}),
+        encoding="utf-8",
+    )
+
+    # 5. Missing batch_id field
+    no_id_dir = batches_dir / "AS-20261110-005"
+    no_id_dir.mkdir()
+    (no_id_dir / "batch.json").write_text(
+        json.dumps({"created_at": "2026-11-10T12:00:00"}),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(backend_main, "DATA_DIR", data_dir)
+    monkeypatch.setattr(backend_main, "DATABASE_PATH", tmp_path / "nonexistent.sqlite3")
+
+    # Calling _get_sorted_batch_list must NOT raise KeyError, JSONDecodeError, or 500
+    sorted_batches = backend_main._get_sorted_batch_list()
+    assert len(sorted_batches) == 1
+    assert sorted_batches[0]["batch_id"] == "AS-20261110-001"
+
+
+def test_s05_get_batch_corrupt_json_returns_clean_404_not_500(auth_client, tmp_path, monkeypatch):
+    """get_batch must degrade corrupt batch.json to a clean 404 error instead of 500 crash (S-05)."""
+    data_dir = tmp_path / "data"
+    batches_dir = data_dir / "batches"
+    batches_dir.mkdir(parents=True)
+
+    # 1. Corrupt JSON in batches directory
+    b1_dir = batches_dir / "AS-CORRUPT-001"
+    b1_dir.mkdir()
+    (b1_dir / "batch.json").write_text("NOT_JSON_DATA{{{", encoding="utf-8")
+
+    # 2. Incomplete non-dict in batches directory
+    b2_dir = batches_dir / "AS-CORRUPT-002"
+    b2_dir.mkdir()
+    (b2_dir / "batch.json").write_text("[]", encoding="utf-8")
+
+    # 3. Corrupt legacy batch
+    legacy_dir = data_dir / "AS-CORRUPT-003"
+    legacy_dir.mkdir()
+    (legacy_dir / "batch.json").write_text("{incomplete", encoding="utf-8")
+
+    monkeypatch.setattr(backend_main, "DATA_DIR", data_dir)
+    monkeypatch.setattr(backend_main, "DATABASE_PATH", tmp_path / "nonexistent.sqlite3")
+
+    # Accessing corrupt batches must return 404 cleanly, never 500
+    for bid in ["AS-CORRUPT-001", "AS-CORRUPT-002", "AS-CORRUPT-003"]:
+        res = auth_client.get(f"/api/batches/{bid}")
+        assert res.status_code == 404, f"Expected 404 for {bid}, got {res.status_code}: {res.text}"
+        assert res.json() == {"detail": "Batch not found"}

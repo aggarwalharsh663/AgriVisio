@@ -994,15 +994,25 @@ async def scan_uploaded_photo(
 
 
 def _get_sorted_batch_list() -> list[dict]:
-    results = {batch["batch_id"]: batch for batch in list_batches(DATABASE_PATH)}
+    results = {}
+    for batch in list_batches(DATABASE_PATH):
+        if isinstance(batch, dict) and batch.get("batch_id") and batch.get("created_at") is not None:
+            results[batch["batch_id"]] = batch
+
     legacy_directory = DATA_DIR / "batches"
     for path in legacy_directory.glob("AS-*/batch.json"):
         try:
             batch = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(batch, dict) or "batch_id" not in batch or "created_at" not in batch:
+                continue
             results.setdefault(batch["batch_id"], batch)
-        except (OSError, json.JSONDecodeError):
+        except (OSError, json.JSONDecodeError, KeyError):
             continue
-    return sorted(results.values(), key=lambda b: b["created_at"], reverse=True)
+    return sorted(
+        results.values(),
+        key=lambda b: (b.get("created_at") if isinstance(b, dict) and b.get("created_at") is not None else ""),
+        reverse=True,
+    )
 
 
 @app.get("/api/batches")
@@ -1036,15 +1046,32 @@ def get_batch(
 ) -> dict:
     if Path(batch_id).name != batch_id or "/" in batch_id or "\\" in batch_id or ".." in batch_id:
         raise HTTPException(status_code=404, detail="Batch not found")
-    batch = read_batch(batch_id, DATABASE_PATH)
+    try:
+        batch = read_batch(batch_id, DATABASE_PATH)
+    except (OSError, json.JSONDecodeError, KeyError):
+        raise HTTPException(status_code=404, detail="Batch not found")
     if batch is not None:
-        return batch
+        if isinstance(batch, dict) and batch.get("batch_id"):
+            return batch
+        raise HTTPException(status_code=404, detail="Batch not found")
     path = DATA_DIR / "batches" / batch_id / "batch.json"
     if path.is_file():
-        return json.loads(path.read_text(encoding="utf-8"))
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                raise HTTPException(status_code=404, detail="Batch not found")
+            return data
+        except (OSError, json.JSONDecodeError, KeyError):
+            raise HTTPException(status_code=404, detail="Batch not found")
     legacy_path = DATA_DIR / batch_id / "batch.json"
     if legacy_path.is_file():
-        return json.loads(legacy_path.read_text(encoding="utf-8"))
+        try:
+            data = json.loads(legacy_path.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                raise HTTPException(status_code=404, detail="Batch not found")
+            return data
+        except (OSError, json.JSONDecodeError, KeyError):
+            raise HTTPException(status_code=404, detail="Batch not found")
     raise HTTPException(status_code=404, detail="Batch not found")
 
 
