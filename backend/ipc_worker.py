@@ -64,6 +64,9 @@ def handle_scan_upload(data: dict) -> dict:
     if not file_path or not os.path.isfile(file_path):
         raise FileNotFoundError(f"Uploaded file path not found: {file_path}")
 
+    if os.path.getsize(file_path) > 10 * 1024 * 1024:
+        raise ValueError("Photo must be 10 MB or smaller.")
+
     image = cv2.imread(file_path)
     if image is None:
         raise ValueError("Choose a valid JPEG, PNG, or WebP photo.")

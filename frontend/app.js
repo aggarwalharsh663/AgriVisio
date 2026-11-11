@@ -607,8 +607,9 @@
 				const button = document.createElement("button");
 				button.className = "history-open";
 				button.type = "button";
-				button.textContent = item.batch_id === batch.batch_id ? "Current" : "Open report";
-				button.disabled = item.batch_id === batch.batch_id;
+				const isCurrent = Boolean(batch && item.batch_id === batch.batch_id);
+				button.textContent = isCurrent ? "Current" : "Open report";
+				button.disabled = isCurrent;
 				button.addEventListener("click", () => openHistoryBatch(item.batch_id));
 				action.append(button);
 				row.append(action);

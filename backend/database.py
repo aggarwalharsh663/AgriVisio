@@ -51,20 +51,38 @@ def save_batch(batch: dict, database_path: Path) -> None:
 
 def get_batch(batch_id: str, database_path: Path) -> dict | None:
     """Read a batch by its public identifier."""
+    if not database_path.is_file():
+        return None
     with _connect(database_path) as connection:
         row = connection.execute(
             "SELECT batch_json FROM batches WHERE batch_id = ?", (batch_id,)
         ).fetchone()
-    return json.loads(row["batch_json"]) if row else None
+    if not row:
+        return None
+    try:
+        data = json.loads(row["batch_json"])
+        return data if isinstance(data, dict) else None
+    except (json.JSONDecodeError, TypeError):
+        return None
 
 
 def list_batches(database_path: Path) -> list[dict]:
-    """Return saved batches newest first."""
+    """Return saved batches newest first, safely ignoring any corrupt records."""
+    if not database_path.is_file():
+        return []
     with _connect(database_path) as connection:
         rows = connection.execute(
             "SELECT batch_json FROM batches ORDER BY created_at DESC, batch_id DESC"
         ).fetchall()
-    return [json.loads(row["batch_json"]) for row in rows]
+    results = []
+    for row in rows:
+        try:
+            parsed = json.loads(row["batch_json"])
+            if isinstance(parsed, dict):
+                results.append(parsed)
+        except (json.JSONDecodeError, TypeError, KeyError):
+            continue
+    return results
 
 
 def list_batch_ids(database_path: Path, prefix: str = "") -> list[str]:

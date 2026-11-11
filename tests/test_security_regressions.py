@@ -940,3 +940,68 @@ def test_s07_token_file_permissions_repaired_on_read(tmp_path, monkeypatch):
 
     # Verify os.chmod was called with 0o600 to repair existing file
     assert any(c[0] == fake_token_file.resolve() and c[1] == 0o600 for c in chmod_calls)
+
+
+def test_database_corrupt_json_handled_gracefully(tmp_path):
+    """database.py get_batch and list_batches must degrade gracefully when rows contain corrupt JSON."""
+    from backend import database
+    import sqlite3
+
+    db_path = tmp_path / "test.sqlite3"
+    with database._connect(db_path) as conn:
+        # Insert one valid batch and one corrupted batch
+        conn.execute(
+            "INSERT INTO batches (batch_id, created_at, batch_json) VALUES (?, ?, ?)",
+            ("AS-VALID", "2026-11-11T10:00:00", json.dumps({"batch_id": "AS-VALID", "created_at": "2026-11-11T10:00:00"})),
+        )
+        conn.execute(
+            "INSERT INTO batches (batch_id, created_at, batch_json) VALUES (?, ?, ?)",
+            ("AS-CORRUPT", "2026-11-11T10:01:00", "{not valid json at all"),
+        )
+
+    # get_batch on corrupt record must return None, not raise JSONDecodeError
+    assert database.get_batch("AS-CORRUPT", db_path) is None
+    valid_batch = database.get_batch("AS-VALID", db_path)
+    assert valid_batch is not None
+    assert valid_batch["batch_id"] == "AS-VALID"
+
+    # list_batches must return valid records and skip corrupt ones
+    batches = database.list_batches(db_path)
+    assert len(batches) == 1
+    assert batches[0]["batch_id"] == "AS-VALID"
+
+
+def test_sorted_batch_list_with_corrupt_database_row(tmp_path, monkeypatch):
+    """_get_sorted_batch_list must not crash when database table contains a corrupted JSON record."""
+    from backend import database
+
+    db_path = tmp_path / "corrupt_test.sqlite3"
+    with database._connect(db_path) as conn:
+        conn.execute(
+            "INSERT INTO batches (batch_id, created_at, batch_json) VALUES (?, ?, ?)",
+            ("AS-CORRUPT-ROW", "2026-11-11T10:00:00", "MALFORMED_JSON_STRING{{{"),
+        )
+
+    monkeypatch.setattr(backend_main, "DATABASE_PATH", db_path)
+    batches = backend_main._get_sorted_batch_list()
+    assert isinstance(batches, list)
+
+
+def test_ipc_worker_rejects_oversized_upload(tmp_path):
+    """ipc_worker.handle_scan_upload must reject images exceeding 10 MB."""
+    from backend.ipc_worker import handle_scan_upload
+
+    huge_file = tmp_path / "huge.jpg"
+    # Create an empty sparse or zero-filled file slightly over 10 MB
+    with open(huge_file, "wb") as f:
+        f.seek(10 * 1024 * 1024 + 1)
+        f.write(b"\0")
+
+    with pytest.raises(ValueError, match="10 MB or smaller"):
+        handle_scan_upload({
+            "file_path": str(huge_file),
+            "sample_name": "Test",
+            "variety": "Basmati",
+            "lighting": "ring_light",
+        })
+

@@ -1048,7 +1048,11 @@ async def scan_uploaded_photo(
 
 def _get_sorted_batch_list() -> list[dict]:
     results = {}
-    for batch in list_batches(DATABASE_PATH):
+    try:
+        db_batches = list_batches(DATABASE_PATH)
+    except Exception:
+        db_batches = []
+    for batch in db_batches:
         if isinstance(batch, dict) and batch.get("batch_id") and batch.get("created_at") is not None:
             results[batch["batch_id"]] = batch
 
