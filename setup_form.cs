@@ -38,7 +38,7 @@ namespace AgriScanSetup
 
         // Configurable expected SHA-256 checksum for agriscan_payload.zip
         // If empty or null, integrity verification uses embedded manifest or validates stream readable
-        public static string ExpectedPayloadSha256 = "B84A0173BF5ED0A0C6F3DF1A5D11E2A106879F04A9A412F45F1DF45947721ECD";
+        public static string ExpectedPayloadSha256 = "68B2EF758126DE00CA7B5C6F924C30D61FE812D59C882FA1D141BA40737FE6BE";
 
                 /// <summary>
         /// Constant-time comparison of two hex hash strings to prevent timing side-channels (S-03).
@@ -56,9 +56,13 @@ namespace AgriScanSetup
             return diff == 0;
         }
 
-        public SetupForm()
+        public SetupForm(string initialPath = null)
         {
             InitializeComponent();
+            if (!string.IsNullOrWhiteSpace(initialPath))
+            {
+                txtInstallPath.Text = initialPath.Trim('"', ' ');
+            }
         }
 
         private void InitializeComponent()
@@ -265,11 +269,70 @@ namespace AgriScanSetup
 
         private void BtnInstall_Click(object sender, EventArgs e)
         {
-            string targetDir = txtInstallPath.Text.Trim();
-            if (string.IsNullOrEmpty(targetDir))
+            string rawPath = txtInstallPath.Text.Trim().Trim('"', ' ', '\t');
+            if (string.IsNullOrEmpty(rawPath))
             {
                 MessageBox.Show("Please specify an installation path.", "Invalid Path", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
+            }
+
+            string targetDir;
+            try
+            {
+                targetDir = Path.GetFullPath(rawPath);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("The specified installation path is invalid:\n\n" + ex.Message, "Invalid Path", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            // Path Safety Check: Prevent installing directly to drive roots or Windows system folders
+            string root = Path.GetPathRoot(targetDir);
+            if (string.Equals(targetDir.TrimEnd('\\', '/'), root.TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase))
+            {
+                MessageBox.Show("Cannot install directly to the root of drive " + root + ". Please choose a subfolder (e.g. " + Path.Combine(root, "AgriScan") + ").", "Invalid Installation Path", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            string winDir = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+            if (!string.IsNullOrEmpty(winDir) && targetDir.StartsWith(winDir, StringComparison.OrdinalIgnoreCase))
+            {
+                MessageBox.Show("Installation inside the Windows directory is strictly prohibited.", "Protected System Directory", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            // Pre-flight Write Permission & Elevation Check
+            if (!CanWriteToDirectory(targetDir))
+            {
+                if (!IsAdministrator())
+                {
+                    DialogResult elevateChoice = MessageBox.Show(
+                        "The selected directory requires administrator privileges:\n\n" + targetDir + "\n\nWould you like to restart the installer with administrator permissions to continue?",
+                        "Administrator Privileges Required",
+                        MessageBoxButtons.YesNo,
+                        MessageBoxIcon.Question
+                    );
+                    if (elevateChoice == DialogResult.Yes)
+                    {
+                        RelaunchAsAdmin(targetDir);
+                        return;
+                    }
+                    else
+                    {
+                        return;
+                    }
+                }
+                else
+                {
+                    MessageBox.Show(
+                        "Cannot write to the target directory:\n\n" + targetDir + "\n\nAccess was denied. Please verify folder permissions or check if Windows Controlled Folder Access (Ransomware Protection) is blocking writes.",
+                        "Write Permission Denied",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error
+                    );
+                    return;
+                }
             }
 
             btnInstall.Enabled = false;
@@ -424,13 +487,14 @@ namespace AgriScanSetup
                         }
                     }
 
+                    string shortcutWarning = null;
                     if (createShortcut)
                     {
                         this.Invoke((MethodInvoker)delegate
                         {
                             lblStatus.Text = "Creating Desktop shortcut...";
                         });
-                        CreateShortcuts(targetDir);
+                        CreateShortcuts(targetDir, out shortcutWarning);
                     }
 
                     this.Invoke((MethodInvoker)delegate
@@ -447,8 +511,13 @@ namespace AgriScanSetup
 
                     this.Invoke((MethodInvoker)delegate
                     {
+                        string successMsg = "AgriScan has been successfully installed!\n\nLocation: " + targetDir;
+                        if (!string.IsNullOrEmpty(shortcutWarning))
+                        {
+                            successMsg += "\n\nNote: " + shortcutWarning;
+                        }
                         MessageBox.Show(
-                            "AgriScan has been successfully installed!\n\nLocation: " + targetDir,
+                            successMsg,
                             "AgriScan Installed",
                             MessageBoxButtons.OK,
                             MessageBoxIcon.Information
@@ -458,14 +527,22 @@ namespace AgriScanSetup
                 }
                 catch (Exception ex)
                 {
+                    string errDetail = ex.Message;
+                    if (ex is UnauthorizedAccessException)
+                    {
+                        errDetail = "Access denied while writing files to:\n" + targetDir + "\n\nThis may be caused by Windows Defender Controlled Folder Access (Ransomware Protection) or insufficient permissions. Try running as administrator or selecting a folder inside your user profile.";
+                    }
                     this.Invoke((MethodInvoker)delegate
                     {
                         progressBar.Visible = false;
                         lblStatus.Text = "Installation failed: " + ex.Message;
                         lblStatus.ForeColor = Color.FromArgb(239, 68, 68);
                         btnInstall.Enabled = true;
+                        txtInstallPath.Enabled = true;
+                        chkDesktopShortcut.Enabled = true;
+                        chkLaunchNow.Enabled = true;
                         MessageBox.Show(
-                            "Installation failed:\n\n" + ex.Message,
+                            "Installation failed:\n\n" + errDetail,
                             "Installation Error",
                             MessageBoxButtons.OK,
                             MessageBoxIcon.Error
@@ -478,8 +555,9 @@ namespace AgriScanSetup
             worker.Start();
         }
 
-        private void CreateShortcuts(string targetDir)
+        private bool CreateShortcuts(string targetDir, out string shortcutWarning)
         {
+            shortcutWarning = null;
             try
             {
                 string exePath = Path.Combine(targetDir, "AgriScan.exe");
@@ -499,8 +577,83 @@ namespace AgriScanSetup
                 }
                 IPersistFile file = (IPersistFile)link;
                 file.Save(shortcutPath, false);
+                return true;
             }
-            catch { }
+            catch (UnauthorizedAccessException)
+            {
+                shortcutWarning = "Desktop shortcut creation was blocked (likely by Windows Controlled Folder Access / Ransomware Protection).\nAgriScan can be launched directly from:\n" + targetDir;
+                return false;
+            }
+            catch (Exception ex)
+            {
+                shortcutWarning = "Shortcut creation failed: " + ex.Message;
+                return false;
+            }
+        }
+
+        public static bool IsAdministrator()
+        {
+            try
+            {
+                using (var identity = System.Security.Principal.WindowsIdentity.GetCurrent())
+                {
+                    var principal = new System.Security.Principal.WindowsPrincipal(identity);
+                    return principal.IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator);
+                }
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        public static bool CanWriteToDirectory(string targetDir)
+        {
+            try
+            {
+                if (!Directory.Exists(targetDir))
+                {
+                    string parent = Path.GetDirectoryName(targetDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+                    while (!string.IsNullOrEmpty(parent) && !Directory.Exists(parent))
+                    {
+                        parent = Path.GetDirectoryName(parent);
+                    }
+                    if (string.IsNullOrEmpty(parent) || !Directory.Exists(parent))
+                        return false;
+
+                    string testSub = Path.Combine(parent, "agriscan_perm_probe_" + Guid.NewGuid().ToString("N"));
+                    Directory.CreateDirectory(testSub);
+                    Directory.Delete(testSub);
+                    return true;
+                }
+
+                string testFile = Path.Combine(targetDir, "agriscan_perm_probe_" + Guid.NewGuid().ToString("N") + ".tmp");
+                File.WriteAllText(testFile, "probe");
+                File.Delete(testFile);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static void RelaunchAsAdmin(string targetDir)
+        {
+            try
+            {
+                ProcessStartInfo psi = new ProcessStartInfo();
+                psi.FileName = Application.ExecutablePath;
+                psi.Arguments = "\"" + targetDir + "\"";
+                psi.Verb = "runas";
+                psi.UseShellExecute = true;
+                Process.Start(psi);
+                Application.Exit();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Unable to request administrator elevation:\n" + ex.Message, "Elevation Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
         }
 
         private void LaunchApp(string targetDir)
@@ -520,11 +673,12 @@ namespace AgriScanSetup
         }
 
         [STAThread]
-        public static void Main()
+        public static void Main(string[] args)
         {
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
-            Application.Run(new SetupForm());
+            string initialPath = (args != null && args.Length > 0 && !string.IsNullOrWhiteSpace(args[0])) ? args[0].Trim('"', ' ') : null;
+            Application.Run(new SetupForm(initialPath));
         }
     }
 

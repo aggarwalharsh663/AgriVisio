@@ -1036,3 +1036,24 @@ def test_installer_and_launcher_pe_manifest_and_metadata():
     assert "IPersistFile" in setup_cs, "Must use native IPersistFile COM interface"
 
 
+def test_installer_environment_permissions_and_uac_safety():
+    """Installer must enforce pre-flight permission checks, UAC elevation prompt, and protected folder guards."""
+    root = Path(backend_main.PROJECT_ROOT)
+    setup_cs = (root / "setup_form.cs").read_text(encoding="utf-8")
+    installer_manifest = (root / "installer.manifest").read_text(encoding="utf-8")
+    launcher_manifest = (root / "launcher.manifest").read_text(encoding="utf-8")
+
+    # 1. Long path and DPI awareness in manifests
+    for man in [installer_manifest, launcher_manifest]:
+        assert "<longPathAware" in man
+        assert "<dpiAware" in man
+
+    # 2. Pre-flight write checks and elevation handling
+    assert "CanWriteToDirectory" in setup_cs
+    assert "IsAdministrator" in setup_cs
+    assert "RelaunchAsAdmin" in setup_cs
+    assert "SpecialFolder.Windows" in setup_cs
+    assert "Controlled Folder Access" in setup_cs
+
+
+
