@@ -1,7 +1,21 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
+
+[assembly: AssemblyTitle("AgriScan")]
+[assembly: AssemblyDescription("AgriScan - Precision Optical Grain Assessment")]
+[assembly: AssemblyConfiguration("")]
+[assembly: AssemblyCompany("AgriScan")]
+[assembly: AssemblyProduct("AgriScan")]
+[assembly: AssemblyCopyright("Copyright © 2026 AgriScan. All rights reserved.")]
+[assembly: AssemblyTrademark("")]
+[assembly: AssemblyCulture("")]
+[assembly: ComVisible(false)]
+[assembly: AssemblyVersion("1.0.0.0")]
+[assembly: AssemblyFileVersion("1.0.0.0")]
 
 namespace AgriScanLauncher
 {

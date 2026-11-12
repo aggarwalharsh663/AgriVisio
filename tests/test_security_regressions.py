@@ -1005,3 +1005,34 @@ def test_ipc_worker_rejects_oversized_upload(tmp_path):
             "lighting": "ring_light",
         })
 
+
+def test_installer_and_launcher_pe_manifest_and_metadata():
+    """Installer and launcher must use native Win32 COM, manifests, and avoid dropper/script heuristics."""
+    root = Path(backend_main.PROJECT_ROOT)
+    setup_cs = (root / "setup_form.cs").read_text(encoding="utf-8")
+    launcher_cs = (root / "launcher.cs").read_text(encoding="utf-8")
+    installer_manifest = root / "installer.manifest"
+    launcher_manifest = root / "launcher.manifest"
+
+    # 1. Manifest existence and contents
+    assert installer_manifest.is_file(), "installer.manifest must exist"
+    assert launcher_manifest.is_file(), "launcher.manifest must exist"
+    inst_man_text = installer_manifest.read_text(encoding="utf-8")
+    assert 'requestedExecutionLevel level="asInvoker"' in inst_man_text
+    assert "{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}" in inst_man_text
+
+    # 2. Assembly metadata in C# sources
+    for code in [setup_cs, launcher_cs]:
+        assert "[assembly: AssemblyTitle(" in code
+        assert "[assembly: AssemblyProduct(" in code
+        assert "[assembly: AssemblyCompany(" in code
+        assert "[assembly: AssemblyVersion(" in code
+        assert "[assembly: AssemblyFileVersion(" in code
+
+    # 3. Elimination of heuristic triggers in setup_form.cs
+    assert "WScript.Shell" not in setup_cs, "WScript.Shell late-binding must be removed"
+    assert "p.Kill()" not in setup_cs, "Forcible p.Kill() must be removed to avoid dropper heuristics"
+    assert "IShellLinkW" in setup_cs, "Must use native IShellLinkW COM interface"
+    assert "IPersistFile" in setup_cs, "Must use native IPersistFile COM interface"
+
+

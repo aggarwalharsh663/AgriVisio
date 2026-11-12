@@ -85,12 +85,30 @@ def build_installer(output_exe: Path | None = None) -> Path:
     out_target = output_exe or (ROOT_DIR / "AgriScanSetup.exe")
     setup_cs = ROOT_DIR / "setup_form.cs"
     icon_ico = ROOT_DIR / "app_icon.ico"
+    installer_manifest = ROOT_DIR / "installer.manifest"
 
     if not setup_cs.is_file():
         raise FileNotFoundError(f"Missing setup source: {setup_cs}")
 
     if not CSC_EXE.is_file():
         raise FileNotFoundError(f"Missing C# compiler at {CSC_EXE}")
+
+    # Compile AgriScan.exe launcher with manifest and PE metadata if source exists
+    launcher_cs = ROOT_DIR / "launcher.cs"
+    launcher_manifest = ROOT_DIR / "launcher.manifest"
+    launcher_exe = ROOT_DIR / "AgriScan.exe"
+    if launcher_cs.is_file() and launcher_manifest.is_file():
+        launcher_cmd = [
+            str(CSC_EXE),
+            "/target:winexe",
+            f"/out:{launcher_exe}",
+            f"/win32icon:{icon_ico}",
+            f"/win32manifest:{launcher_manifest}",
+            str(launcher_cs),
+        ]
+        res_l = subprocess.run(launcher_cmd, capture_output=True, text=True)
+        if res_l.returncode != 0:
+            print("Warning: Launcher compilation failed:", res_l.stderr)
 
     print("--- [1/4] Building installation payload ZIP ---")
     tmp_payload = ROOT_DIR / "agriscan_payload.zip"
@@ -137,6 +155,7 @@ def build_installer(output_exe: Path | None = None) -> Path:
             "/target:winexe",
             f"/out:{out_target}",
             f"/win32icon:{icon_ico}",
+            f"/win32manifest:{installer_manifest}",
             "/reference:System.IO.Compression.dll",
             "/reference:System.IO.Compression.FileSystem.dll",
             f"/resource:{tmp_payload},agriscan_payload.zip",

@@ -4,11 +4,24 @@ using System.Drawing;
 using System.IO;
 using System.IO.Compression;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Security;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Windows.Forms;
+
+[assembly: AssemblyTitle("AgriScan Setup")]
+[assembly: AssemblyDescription("AgriScan Precision Optical Grain Assessment Installer")]
+[assembly: AssemblyConfiguration("")]
+[assembly: AssemblyCompany("AgriScan")]
+[assembly: AssemblyProduct("AgriScan Precision Optical Grain Assessment")]
+[assembly: AssemblyCopyright("Copyright © 2026 AgriScan. All rights reserved.")]
+[assembly: AssemblyTrademark("")]
+[assembly: AssemblyCulture("")]
+[assembly: ComVisible(false)]
+[assembly: AssemblyVersion("1.0.0.0")]
+[assembly: AssemblyFileVersion("1.0.0.0")]
 
 namespace AgriScanSetup
 {
@@ -25,7 +38,7 @@ namespace AgriScanSetup
 
         // Configurable expected SHA-256 checksum for agriscan_payload.zip
         // If empty or null, integrity verification uses embedded manifest or validates stream readable
-        public static string ExpectedPayloadSha256 = "D0B2733B6CF6B38D978724D7A7EF9A6758E240E79D294A42835D31ED759881B2";
+        public static string ExpectedPayloadSha256 = "B84A0173BF5ED0A0C6F3DF1A5D11E2A106879F04A9A412F45F1DF45947721ECD";
 
                 /// <summary>
         /// Constant-time comparison of two hex hash strings to prevent timing side-channels (S-03).
@@ -220,8 +233,8 @@ namespace AgriScanSetup
         }
 
         /// <summary>
-        /// Safely terminates only running AgriScan instances located in the target directory.
-        /// NEVER terminates unrelated system Electron applications.
+        /// Gracefully requests any currently open AgriScan application instances in target directory to close.
+        /// Does not perform forceful process termination.
         /// </summary>
         private void CloseExistingAgriScanProcesses(string targetDir)
         {
@@ -229,33 +242,8 @@ namespace AgriScanSetup
             {
                 string canonicalTarget = Path.GetFullPath(targetDir).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 
-                // Terminate AgriScan launcher/app processes
+                // Gracefully request AgriScan processes to close their main window
                 foreach (var p in Process.GetProcessesByName("AgriScan"))
-                {
-                    try
-                    {
-                        try
-                        {
-                            if (p.MainModule != null)
-                            {
-                                string exePath = Path.GetFullPath(p.MainModule.FileName);
-                                if (exePath.StartsWith(canonicalTarget, StringComparison.OrdinalIgnoreCase))
-                                {
-                                    p.CloseMainWindow();
-                                    if (!p.WaitForExit(1000)) { p.Kill(); }
-                                }
-                            }
-                        }
-                        catch
-                        {
-                            p.CloseMainWindow();
-                        }
-                    }
-                    catch { }
-                }
-
-                // Check Electron processes: only terminate if their executable is inside the AgriScan target directory!
-                foreach (var p in Process.GetProcessesByName("electron"))
                 {
                     try
                     {
@@ -265,7 +253,7 @@ namespace AgriScanSetup
                             if (exePath.StartsWith(canonicalTarget, StringComparison.OrdinalIgnoreCase))
                             {
                                 p.CloseMainWindow();
-                                if (!p.WaitForExit(1000)) { p.Kill(); }
+                                p.WaitForExit(1500);
                             }
                         }
                     }
@@ -499,20 +487,18 @@ namespace AgriScanSetup
                 string desktopPath = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
                 string shortcutPath = Path.Combine(desktopPath, "AgriScan.lnk");
 
-                Type shellType = Type.GetTypeFromProgID("WScript.Shell");
-                if (shellType != null)
+                // Native Win32 Shell Link creation via IShellLink COM interface
+                // Avoids Windows Script Host and dynamic script execution (Issue 3 / ASR rules)
+                IShellLinkW link = (IShellLinkW)new ShellLink();
+                link.SetDescription("AgriScan - Precision Optical Grain Assessment");
+                link.SetPath(exePath);
+                link.SetWorkingDirectory(targetDir);
+                if (File.Exists(iconPath))
                 {
-                    dynamic shell = Activator.CreateInstance(shellType);
-                    dynamic shortcut = shell.CreateShortcut(shortcutPath);
-                    shortcut.TargetPath = exePath;
-                    shortcut.WorkingDirectory = targetDir;
-                    shortcut.Description = "AgriScan - Precision Optical Grain Assessment";
-                    if (File.Exists(iconPath))
-                    {
-                        shortcut.IconLocation = iconPath + ",0";
-                    }
-                    shortcut.Save();
+                    link.SetIconLocation(iconPath, 0);
                 }
+                IPersistFile file = (IPersistFile)link;
+                file.Save(shortcutPath, false);
             }
             catch { }
         }
@@ -540,5 +526,47 @@ namespace AgriScanSetup
             Application.SetCompatibleTextRenderingDefault(false);
             Application.Run(new SetupForm());
         }
+    }
+
+    [ComImport]
+    [Guid("00021401-0000-0000-C000-000000000046")]
+    internal class ShellLink { }
+
+    [ComImport]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    [Guid("000214F9-0000-0000-C000-000000000046")]
+    internal interface IShellLinkW
+    {
+        void GetPath([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszFile, int cchMaxPath, out IntPtr pfd, uint fFlags);
+        void GetIDList(out IntPtr ppidl);
+        void SetIDList(IntPtr pidl);
+        void GetDescription([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszName, int cchMaxName);
+        void SetDescription([MarshalAs(UnmanagedType.LPWStr)] string pszName);
+        void GetWorkingDirectory([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszDir, int cchMaxPath);
+        void SetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)] string pszDir);
+        void GetArguments([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszArgs, int cchMaxPath);
+        void SetArguments([MarshalAs(UnmanagedType.LPWStr)] string pszArgs);
+        void GetHotkey(out short pwHotkey);
+        void SetHotkey(short wHotkey);
+        void GetShowCmd(out int piShowCmd);
+        void SetShowCmd(int iShowCmd);
+        void GetIconLocation([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszIconPath, int cchIconPath, out int piIcon);
+        void SetIconLocation([MarshalAs(UnmanagedType.LPWStr)] string pszIconPath, int iIcon);
+        void SetRelativePath([MarshalAs(UnmanagedType.LPWStr)] string pszPathRel, uint dwReserved);
+        void Resolve(IntPtr hwnd, uint fFlags);
+        void SetPath([MarshalAs(UnmanagedType.LPWStr)] string pszFile);
+    }
+
+    [ComImport]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    [Guid("0000010b-0000-0000-C000-000000000046")]
+    internal interface IPersistFile
+    {
+        void GetClassID(out Guid pClassID);
+        void IsDirty();
+        void Load([MarshalAs(UnmanagedType.LPWStr)] string pszFileName, uint dwMode);
+        void Save([MarshalAs(UnmanagedType.LPWStr)] string pszFileName, [MarshalAs(UnmanagedType.Bool)] bool fRemember);
+        void SaveCompleted([MarshalAs(UnmanagedType.LPWStr)] string pszFileName);
+        void GetCurFile([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder ppszFileName);
     }
 }
