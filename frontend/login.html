@@ -124,7 +124,7 @@
             const err = await resp.json().catch(() => ({}));
             showError(err.detail || "Authentication failed. The secret may be invalid, expired, or already used.");
           } catch (err) {
-            showError("Network error connecting to AgriScan server.");
+            showError("Network error connecting to AgriVisio server.");
           } finally {
             submitBtn.disabled = false;
             btnLabel.textContent = "Authenticate Session";
