@@ -895,7 +895,9 @@
 			}
 			let response = await fetch(endpoint, requestOptions);
 			if (response.status === 401) {
-				showLoginModal();
+				if (!isDesktopMode()) {
+					showLoginModal();
+				}
 				throw new Error("Session expired or unauthenticated. Please re-authenticate.");
 			}
 			let result = await response.json().catch(() => ({}));
@@ -985,7 +987,10 @@
 	const loginBtn = document.querySelector("#login-submit-btn");
 	const logoutBtn = document.querySelector("#logout-btn");
 
+	const isDesktopMode = () => window.location.protocol === "app:" || Boolean(window.electronAPI);
+
 	function showLoginModal() {
+		if (isDesktopMode()) return;
 		if (loginModal) {
 			loginModal.style.display = "flex";
 			loginModal.setAttribute("aria-hidden", "false");
@@ -1001,10 +1006,14 @@
 			loginModal.style.display = "none";
 			loginModal.setAttribute("aria-hidden", "true");
 		}
-		if (logoutBtn) logoutBtn.style.display = "inline-flex";
+		if (logoutBtn && !isDesktopMode()) logoutBtn.style.display = "inline-flex";
 	}
 
 	async function checkAuthStatus() {
+		if (isDesktopMode()) {
+			hideLoginModal();
+			return true;
+		}
 		try {
 			const res = await fetch("/api/auth/status");
 			if (res.ok) {
@@ -1069,6 +1078,10 @@
 	}
 
 	async function initAuth() {
+		if (isDesktopMode()) {
+			hideLoginModal();
+			return;
+		}
 		if (loginForm) {
 			loginForm.addEventListener("submit", async (e) => {
 				e.preventDefault();
