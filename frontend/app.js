@@ -721,7 +721,7 @@
 			const url = URL.createObjectURL(blob);
 			const link = document.createElement("a");
 			link.href = url;
-			link.download = `AgriScan-Report-${batchId}.html`;
+			link.download = `AgriVisio-Report-${batchId}.html`;
 			document.body.appendChild(link);
 			link.click();
 			document.body.removeChild(link);
@@ -732,7 +732,7 @@
 			} catch (e) {}
 
 			downloadBtn.textContent = "✓ Downloaded!";
-			announce(`Report downloaded as AgriScan-Report-${batchId}.html`);
+			announce(`Report downloaded as AgriVisio-Report-${batchId}.html`);
 			setTimeout(() => {
 				downloadBtn.disabled = false;
 				downloadBtn.innerHTML = originalText;
@@ -783,7 +783,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>AgriScan Report - ${safeBatchId}</title>
+<title>AgriVisio Report - ${safeBatchId}</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #ffffff; color: #0f172a; padding: 32px; line-height: 1.5; }
@@ -809,9 +809,9 @@
 </head>
 <body>
   <div class="header">
-    <img src="/assets/emblem.png" class="logo" alt="AgriScan Logo">
+    <img src="/assets/emblem.png" class="logo" alt="AgriVisio Logo">
     <div class="header-text">
-      <h1>AGRI<span>SCAN</span></h1>
+      <h1>AGRI<span>VISIO</span></h1>
       <p>Precision Optical Grain Quality Assessment Report</p>
     </div>
   </div>
@@ -831,7 +831,7 @@
     <tbody>${rowsHtml}</tbody>
   </table>
   <div class="footer">
-    <span>AgriScan Precision Optics &bull; Laboratory Assessment Report</span>
+    <span>AgriVisio Precision Optics &bull; Laboratory Assessment Report</span>
     <span>Fingerprint: <code>${fingerprint}</code></span>
   </div>
 </body>
@@ -944,13 +944,14 @@
 	});
 
 	function initTheme() {
-		const saved = localStorage.getItem("agriscan_theme") || "light";
+		const saved = localStorage.getItem("agrivisio_theme") || localStorage.getItem("agriscan_theme") || "light";
 		applyTheme(saved);
 		const toggleBtn = document.querySelector("#theme-toggle");
 		if (toggleBtn) {
 			toggleBtn.addEventListener("click", () => {
 				const current = document.documentElement.classList.contains("dark") ? "dark" : "light";
 				const next = current === "dark" ? "light" : "dark";
+				localStorage.setItem("agrivisio_theme", next);
 				localStorage.setItem("agriscan_theme", next);
 				applyTheme(next);
 				if (typeof renderReportCharts.create === "function") {
@@ -1046,7 +1047,7 @@
 			showLoginModal();
 		} catch (e) {
 			if (loginError) {
-				loginError.textContent = "Network error connecting to AgriScan server.";
+				loginError.textContent = "Network error connecting to AgriVisio server.";
 				loginError.style.display = "block";
 			}
 			showLoginModal();

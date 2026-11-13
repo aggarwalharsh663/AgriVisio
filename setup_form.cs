@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
@@ -11,19 +12,19 @@ using System.Text;
 using System.Threading;
 using System.Windows.Forms;
 
-[assembly: AssemblyTitle("AgriScan Setup")]
-[assembly: AssemblyDescription("AgriScan Precision Optical Grain Assessment Installer")]
+[assembly: AssemblyTitle("AgriVisio Setup")]
+[assembly: AssemblyDescription("AgriVisio Precision Optical Grain Assessment Installer")]
 [assembly: AssemblyConfiguration("")]
-[assembly: AssemblyCompany("AgriScan")]
-[assembly: AssemblyProduct("AgriScan Precision Optical Grain Assessment")]
-[assembly: AssemblyCopyright("Copyright © 2026 AgriScan. All rights reserved.")]
+[assembly: AssemblyCompany("AgriVisio")]
+[assembly: AssemblyProduct("AgriVisio Precision Optical Grain Assessment")]
+[assembly: AssemblyCopyright("Copyright © 2026 AgriVisio. All rights reserved.")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
 [assembly: ComVisible(false)]
 [assembly: AssemblyVersion("1.0.0.0")]
 [assembly: AssemblyFileVersion("1.0.0.0")]
 
-namespace AgriScanSetup
+namespace AgriVisioSetup
 {
     public class SetupForm : Form
     {
@@ -38,7 +39,7 @@ namespace AgriScanSetup
 
         // Configurable expected SHA-256 checksum for agriscan_payload.zip
         // If empty or null, integrity verification uses embedded manifest or validates stream readable
-        public static string ExpectedPayloadSha256 = "977E249CD36AAD287006745D1070AA47D344B96CFC1C9FFD0C471E881C7359D4";
+        public static string ExpectedPayloadSha256 = "E2C0A2B533D82DE398F2E902CA0AFBF8EE6D010B3804B1C29D20ECB6DB016A09";
 
                 /// <summary>
         /// Constant-time comparison of two hex hash strings to prevent timing side-channels (S-03).
@@ -67,7 +68,7 @@ namespace AgriScanSetup
 
         private void InitializeComponent()
         {
-            this.Text = "AgriScan Setup - Precision Optical Grain Assessment";
+            this.Text = "AgriVisio Setup - Precision Optical Grain Assessment";
             this.Size = new Size(580, 420);
             this.StartPosition = FormStartPosition.CenterScreen;
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -87,7 +88,7 @@ namespace AgriScanSetup
             catch { }
 
             lblTitle = new Label();
-            lblTitle.Text = "AgriScan Setup";
+            lblTitle.Text = "AgriVisio Setup";
             lblTitle.Font = new Font("Segoe UI", 18, FontStyle.Bold);
             lblTitle.ForeColor = Color.FromArgb(245, 158, 11);
             lblTitle.Location = new Point(30, 25);
@@ -95,7 +96,7 @@ namespace AgriScanSetup
             this.Controls.Add(lblTitle);
 
             lblDesc = new Label();
-            lblDesc.Text = "Install AgriScan Precision Optical Grain Assessment desktop application on this computer.";
+            lblDesc.Text = "Install AgriVisio Precision Optical Grain Assessment desktop application on this computer.";
             lblDesc.Font = new Font("Segoe UI", 9.5f, FontStyle.Regular);
             lblDesc.ForeColor = Color.FromArgb(148, 163, 184);
             lblDesc.Location = new Point(32, 68);
@@ -113,7 +114,7 @@ namespace AgriScanSetup
             string defaultDir = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "Programs",
-                "AgriScan"
+                "AgriVisio"
             );
 
             txtInstallPath = new TextBox();
@@ -141,7 +142,7 @@ namespace AgriScanSetup
                     fbd.SelectedPath = txtInstallPath.Text;
                     if (fbd.ShowDialog() == DialogResult.OK)
                     {
-                        txtInstallPath.Text = Path.Combine(fbd.SelectedPath, "AgriScan");
+                        txtInstallPath.Text = Path.Combine(fbd.SelectedPath, "AgriVisio");
                     }
                 }
             };
@@ -157,7 +158,7 @@ namespace AgriScanSetup
             this.Controls.Add(chkDesktopShortcut);
 
             chkLaunchNow = new CheckBox();
-            chkLaunchNow.Text = "Launch AgriScan after installation completes";
+            chkLaunchNow.Text = "Launch AgriVisio after installation completes";
             chkLaunchNow.Font = new Font("Segoe UI", 9.5f);
             chkLaunchNow.ForeColor = Color.FromArgb(226, 232, 240);
             chkLaunchNow.Checked = true;
@@ -181,7 +182,7 @@ namespace AgriScanSetup
             this.Controls.Add(lblStatus);
 
             btnInstall = new Button();
-            btnInstall.Text = "Install AgriScan";
+            btnInstall.Text = "Install AgriVisio";
             btnInstall.Font = new Font("Segoe UI", 10.5f, FontStyle.Bold);
             btnInstall.Location = new Point(364, 325);
             btnInstall.Size = new Size(170, 40);
@@ -237,7 +238,7 @@ namespace AgriScanSetup
         }
 
         /// <summary>
-        /// Gracefully requests any currently open AgriScan application instances in target directory to close.
+        /// Gracefully requests any currently open AgriVisio or AgriScan application instances in target directory to close.
         /// Does not perform forceful process termination.
         /// </summary>
         private void CloseExistingAgriScanProcesses(string targetDir)
@@ -246,8 +247,11 @@ namespace AgriScanSetup
             {
                 string canonicalTarget = Path.GetFullPath(targetDir).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 
-                // Gracefully request AgriScan processes to close their main window
-                foreach (var p in Process.GetProcessesByName("AgriScan"))
+                // Gracefully request application processes to close their main window
+                var procs = new List<Process>();
+                procs.AddRange(Process.GetProcessesByName("AgriVisio"));
+                procs.AddRange(Process.GetProcessesByName("AgriScan"));
+                foreach (var p in procs)
                 {
                     try
                     {
@@ -511,14 +515,14 @@ namespace AgriScanSetup
 
                     this.Invoke((MethodInvoker)delegate
                     {
-                        string successMsg = "AgriScan has been successfully installed!\n\nLocation: " + targetDir;
+                        string successMsg = "AgriVisio has been successfully installed!\n\nLocation: " + targetDir;
                         if (!string.IsNullOrEmpty(shortcutWarning))
                         {
                             successMsg += "\n\nNote: " + shortcutWarning;
                         }
                         MessageBox.Show(
                             successMsg,
-                            "AgriScan Installed",
+                            "AgriVisio Installed",
                             MessageBoxButtons.OK,
                             MessageBoxIcon.Information
                         );
@@ -560,15 +564,15 @@ namespace AgriScanSetup
             shortcutWarning = null;
             try
             {
-                string exePath = Path.Combine(targetDir, "AgriScan.exe");
+                string exePath = File.Exists(Path.Combine(targetDir, "AgriVisio.exe")) ? Path.Combine(targetDir, "AgriVisio.exe") : Path.Combine(targetDir, "AgriScan.exe");
                 string iconPath = Path.Combine(targetDir, "app_icon.ico");
                 string desktopPath = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
-                string shortcutPath = Path.Combine(desktopPath, "AgriScan.lnk");
+                string shortcutPath = Path.Combine(desktopPath, "AgriVisio.lnk");
 
                 // Native Win32 Shell Link creation via IShellLink COM interface
                 // Avoids Windows Script Host and dynamic script execution (Issue 3 / ASR rules)
                 IShellLinkW link = (IShellLinkW)new ShellLink();
-                link.SetDescription("AgriScan - Precision Optical Grain Assessment");
+                link.SetDescription("AgriVisio - Precision Optical Grain Assessment");
                 link.SetPath(exePath);
                 link.SetWorkingDirectory(targetDir);
                 if (File.Exists(iconPath))
@@ -581,7 +585,7 @@ namespace AgriScanSetup
             }
             catch (UnauthorizedAccessException)
             {
-                shortcutWarning = "Desktop shortcut creation was blocked (likely by Windows Controlled Folder Access / Ransomware Protection).\nAgriScan can be launched directly from:\n" + targetDir;
+                shortcutWarning = "Desktop shortcut creation was blocked (likely by Windows Controlled Folder Access / Ransomware Protection).\nAgriVisio can be launched directly from:\n" + targetDir;
                 return false;
             }
             catch (Exception ex)
@@ -660,7 +664,7 @@ namespace AgriScanSetup
         {
             try
             {
-                string exePath = Path.Combine(targetDir, "AgriScan.exe");
+                string exePath = File.Exists(Path.Combine(targetDir, "AgriVisio.exe")) ? Path.Combine(targetDir, "AgriVisio.exe") : Path.Combine(targetDir, "AgriScan.exe");
                 if (File.Exists(exePath))
                 {
                     ProcessStartInfo psi = new ProcessStartInfo();

@@ -55,19 +55,19 @@ ESTIMATED_MM_PER_PIXEL = 0.12
 # Bootstrap Secret Management (R-02 / S-01 / S-02 / T-01)
 _bootstrap_lock = threading.RLock()
 _bootstrap_secrets: dict[str, dict[str, Any]] = {}
-BOOTSTRAP_SECRET_TTL = float(os.getenv("AGRISCAN_BOOTSTRAP_TTL", "300.0"))  # Default 300s (5m) for browser mode
+BOOTSTRAP_SECRET_TTL = float(os.getenv("AGRIVISIO_BOOTSTRAP_TTL") or os.getenv("AGRISCAN_BOOTSTRAP_TTL", "300.0"))  # Default 300s (5m) for browser mode
 _last_console_printed_secret: str | None = None
 
 
 def print_bootstrap_banner(secret: str, ttl: float = BOOTSTRAP_SECRET_TTL, reason: str = "") -> None:
     """Print the single-use bootstrap secret and direct URL to the server console (T-01)."""
-    host = os.getenv("AGRISCAN_HOST", "127.0.0.1")
-    port = os.getenv("AGRISCAN_PORT", "8000")
+    host = os.getenv("AGRIVISIO_HOST") or os.getenv("AGRISCAN_HOST", "127.0.0.1")
+    port = os.getenv("AGRIVISIO_PORT") or os.getenv("AGRISCAN_PORT", "8000")
     url = f"http://{host}:{port}/?bootstrap={secret}"
     banner = [
         "",
         "=" * 70,
-        " AGRISCAN BROWSER AUTHENTICATION (T-01)",
+        " AGRIVISIO / AGRISCAN BROWSER AUTHENTICATION (T-01)",
         "=" * 70,
         f" One-time bootstrap secret: {secret}",
         f" Direct login URL:          {url}",
@@ -184,7 +184,7 @@ def consume_bootstrap_secret(secret: str) -> bool:
 
 
 # Register initial bootstrap secret from environment if present
-_initial_secret = os.getenv("AGRISCAN_BOOTSTRAP_SECRET")
+_initial_secret = os.getenv("AGRIVISIO_BOOTSTRAP_SECRET") or os.getenv("AGRISCAN_BOOTSTRAP_SECRET")
 if _initial_secret:
     register_bootstrap_secret(_initial_secret.strip())
 
@@ -194,7 +194,7 @@ AUTH_TOKEN_FILE = DATA_DIR / ".auth_token"
 
 def get_or_create_api_token() -> str:
     """Retrieve or generate secure authentication token (S-07)."""
-    env_token = os.getenv("AGRISCAN_API_TOKEN")
+    env_token = os.getenv("AGRIVISIO_API_TOKEN") or os.getenv("AGRISCAN_API_TOKEN")
     if env_token:
         return env_token.strip()
     path = AUTH_TOKEN_FILE
@@ -224,18 +224,20 @@ def get_or_create_api_token() -> str:
 
 async def verify_api_token(
     request: Request,
+    x_agrivisio_token: str | None = Header(None, alias="X-AgriVisio-Token"),
     x_agriscan_token: str | None = Header(None, alias="X-AgriScan-Token"),
     authorization: str | None = Header(None),
 ) -> str:
     """Verify local API token on protected operations.
 
     Query-token (?token=...) authentication is strictly removed (R-02).
-    Only header tokens (X-AgriScan-Token / Bearer) or HttpOnly session cookie accepted.
+    Only header tokens (X-AgriVisio-Token / X-AgriScan-Token / Bearer) or HttpOnly session cookie accepted.
     """
 
     expected = get_or_create_api_token()
 
-    if x_agriscan_token and secrets.compare_digest(x_agriscan_token.strip(), expected):
+    header_token = x_agrivisio_token or x_agriscan_token
+    if header_token and secrets.compare_digest(header_token.strip(), expected):
         return expected
 
     if authorization and authorization.startswith("Bearer "):
@@ -243,13 +245,13 @@ async def verify_api_token(
         if secrets.compare_digest(bearer, expected):
             return expected
 
-    cookie_token = request.cookies.get("agriscan_session")
+    cookie_token = request.cookies.get("agrivisio_session") or request.cookies.get("agriscan_session")
     if cookie_token and secrets.compare_digest(cookie_token.strip(), expected):
         return expected
 
     raise HTTPException(
         status_code=401,
-        detail="Unauthorized: Valid authentication token required. Provide X-AgriScan-Token, Bearer token, or session cookie.",
+        detail="Unauthorized: Valid authentication token required. Provide X-AgriVisio-Token, X-AgriScan-Token, Bearer token, or session cookie.",
     )
 
 
@@ -377,7 +379,7 @@ def is_mock_mode_enabled() -> bool:
     AGRISCAN_ENV=development is explicitly configured AND MOCK=1.
     If AGRISCAN_ENV=production, mock mode is strictly prohibited.
     """
-    env = os.getenv("AGRISCAN_ENV", "").strip().lower()
+    env = (os.getenv("AGRIVISIO_ENV") or os.getenv("AGRISCAN_ENV", "")).strip().lower()
     mock_flag = os.getenv("MOCK", "0").strip().lower()
     if mock_flag in ("1", "true", "yes"):
         if env == "production":
@@ -753,7 +755,7 @@ async def lifespan(app: FastAPI):
     ensure_active_bootstrap_secret(print_console=True, reason="server startup")
 
     # Validate custom CORS configuration at startup (S-06)
-    raw_cors = os.getenv("AGRISCAN_ALLOWED_ORIGINS")
+    raw_cors = os.getenv("AGRIVISIO_ALLOWED_ORIGINS") or os.getenv("AGRISCAN_ALLOWED_ORIGINS")
     if raw_cors:
         parse_and_validate_allowed_origins(raw_cors)
 
@@ -789,7 +791,7 @@ async def lifespan(app: FastAPI):
             pass
 
 
-app = FastAPI(title="AgriScan - Precision Optical Grain Assessment", lifespan=lifespan)
+app = FastAPI(title="AgriVisio - Precision Optical Grain Assessment", lifespan=lifespan)
 
 # Restrict CORS to trusted local origins (S-06)
 DEFAULT_TRUSTED_ORIGINS = [
@@ -797,18 +799,19 @@ DEFAULT_TRUSTED_ORIGINS = [
     "http://localhost:8000",
     "http://127.0.0.1",
     "http://localhost",
+    "app://agrivisio",
     "app://agriscan",
 ]
 
 
 def parse_and_validate_allowed_origins(raw_origins: str | None = None) -> list[str]:
-    """Parse, validate, and filter custom CORS origins from AGRISCAN_ALLOWED_ORIGINS (S-06).
+    """Parse, validate, and filter custom CORS origins from AGRIVISIO_ALLOWED_ORIGINS / AGRISCAN_ALLOWED_ORIGINS (S-06).
 
     - Outright rejects wildcard '*' or any wildcard patterns to prevent arbitrary cross-origin access.
     - Drops empty values and duplicate origins.
     - Fails loudly with logging when invalid or wildcard values are supplied.
     """
-    raw = raw_origins if raw_origins is not None else os.getenv("AGRISCAN_ALLOWED_ORIGINS", "")
+    raw = raw_origins if raw_origins is not None else (os.getenv("AGRIVISIO_ALLOWED_ORIGINS") or os.getenv("AGRISCAN_ALLOWED_ORIGINS", ""))
     trusted = list(DEFAULT_TRUSTED_ORIGINS)
     seen = set(trusted)
 
@@ -873,7 +876,7 @@ _has_received_heartbeat = False
 
 @app.get("/api/health")
 def health() -> dict[str, Any]:
-    return {"status": "ok", "service": "AgriScan Precision Optical Grain Assessment"}
+    return {"status": "ok", "service": "AgriVisio Precision Optical Grain Assessment"}
 
 
 class BootstrapRequest(BaseModel):
@@ -897,6 +900,15 @@ def exchange_bootstrap_secret(req: BootstrapRequest, request: Request, response:
     token = get_or_create_api_token()
     is_secure = request.url.scheme == "https"
     response.set_cookie(
+        key="agrivisio_session",
+        value=token,
+        httponly=True,
+        samesite="lax",
+        secure=is_secure,
+        path="/",
+        max_age=86400,
+    )
+    response.set_cookie(
         key="agriscan_session",
         value=token,
         httponly=True,
@@ -913,10 +925,10 @@ def exchange_bootstrap_secret(req: BootstrapRequest, request: Request, response:
 def auth_status(request: Request):
     """Check whether the current caller possesses a valid authenticated session (T-01)."""
     expected = get_or_create_api_token()
-    cookie_token = request.cookies.get("agriscan_session")
+    cookie_token = request.cookies.get("agrivisio_session") or request.cookies.get("agriscan_session")
     if cookie_token and secrets.compare_digest(cookie_token.strip(), expected):
         return {"authenticated": True}
-    token_header = request.headers.get("x-agriscan-token")
+    token_header = request.headers.get("x-agrivisio-token") or request.headers.get("x-agriscan-token")
     if token_header and secrets.compare_digest(token_header.strip(), expected):
         return {"authenticated": True}
     auth_header = request.headers.get("authorization")
@@ -929,6 +941,12 @@ def auth_status(request: Request):
 @app.post("/api/auth/logout")
 def logout(response: Response):
     """Terminate the authenticated session and clear the session cookie (R-02)."""
+    response.delete_cookie(
+        key="agrivisio_session",
+        path="/",
+        httponly=True,
+        samesite="lax",
+    )
     response.delete_cookie(
         key="agriscan_session",
         path="/",
@@ -1146,7 +1164,7 @@ def export_batch(
     safe_batch_id = "".join(c for c in batch_id if c.isalnum() or c in "-_")
     return JSONResponse(
         content=batch,
-        headers={"Content-Disposition": f'attachment; filename="AgriScan-Report-{safe_batch_id}.json"'},
+        headers={"Content-Disposition": f'attachment; filename="AgriVisio-Report-{safe_batch_id}.json"'},
     )
 
 
@@ -1170,9 +1188,9 @@ class ProtectedDataFilesApp(StaticFiles):
         # 1. Authenticate every /files request (R-01)
         req = Request(scope)
         expected = get_or_create_api_token()
-        token_header = req.headers.get("x-agriscan-token")
+        token_header = req.headers.get("x-agrivisio-token") or req.headers.get("x-agriscan-token")
         auth_header = req.headers.get("authorization")
-        cookie_token = req.cookies.get("agriscan_session")
+        cookie_token = req.cookies.get("agrivisio_session") or req.cookies.get("agriscan_session")
 
         authenticated = False
         if token_header and secrets.compare_digest(token_header.strip(), expected):

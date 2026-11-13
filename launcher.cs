@@ -5,19 +5,19 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
-[assembly: AssemblyTitle("AgriScan")]
-[assembly: AssemblyDescription("AgriScan - Precision Optical Grain Assessment")]
+[assembly: AssemblyTitle("AgriVisio")]
+[assembly: AssemblyDescription("AgriVisio - Precision Optical Grain Assessment")]
 [assembly: AssemblyConfiguration("")]
-[assembly: AssemblyCompany("AgriScan")]
-[assembly: AssemblyProduct("AgriScan")]
-[assembly: AssemblyCopyright("Copyright © 2026 AgriScan. All rights reserved.")]
+[assembly: AssemblyCompany("AgriVisio")]
+[assembly: AssemblyProduct("AgriVisio")]
+[assembly: AssemblyCopyright("Copyright © 2026 AgriVisio. All rights reserved.")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
 [assembly: ComVisible(false)]
 [assembly: AssemblyVersion("1.0.0.0")]
 [assembly: AssemblyFileVersion("1.0.0.0")]
 
-namespace AgriScanLauncher
+namespace AgriVisioLauncher
 {
     static class Program
     {
@@ -34,10 +34,10 @@ namespace AgriScanLauncher
                 if (!File.Exists(electronExe))
                 {
                     MessageBox.Show(
-                        "AgriScan application files are incomplete.\n\n" +
+                        "AgriVisio application files are incomplete.\n\n" +
                         "Missing: " + electronExe + "\n\n" +
                         "Please verify the installation directory.",
-                        "AgriScan - Missing Component",
+                        "AgriVisio - Missing Component",
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Warning
                     );
@@ -57,8 +57,8 @@ namespace AgriScanLauncher
             catch (Exception ex)
             {
                 MessageBox.Show(
-                    "Unable to launch AgriScan:\n\n" + ex.Message,
-                    "AgriScan Launch Error",
+                    "Unable to launch AgriVisio:\n\n" + ex.Message,
+                    "AgriVisio Launch Error",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error
                 );

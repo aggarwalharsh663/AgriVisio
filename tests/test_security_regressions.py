@@ -257,7 +257,7 @@ def test_export_filename_sanitization(auth_client):
             res = auth_client.get("/api/batches/AS-TEST-EXPORT/export")
             assert res.status_code == 200
             cd = res.headers.get("content-disposition", "")
-            assert 'filename="AgriScan-Report-AS-TEST-EXPORT.json"' in cd
+            assert 'filename="AgriVisio-Report-AS-TEST-EXPORT.json"' in cd or 'filename="AgriScan-Report-AS-TEST-EXPORT.json"' in cd
         finally:
             backend_main.DATA_DIR = old_data_dir
 

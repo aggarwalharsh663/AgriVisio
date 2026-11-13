@@ -342,7 +342,7 @@ function registerProtocolHandler() {
             return new Response(JSON.stringify({ status: 'authenticated' }), {
               headers: {
                 'content-type': 'application/json',
-                'set-cookie': `agriscan_session=${result.session_token}; HttpOnly; SameSite=Lax; Path=/`,
+                'set-cookie': `agrivisio_session=${result.session_token}; HttpOnly; SameSite=Lax; Path=/`,
               },
             });
           }
@@ -360,7 +360,7 @@ function registerProtocolHandler() {
         return new Response(JSON.stringify({ status: 'logged_out' }), {
           headers: {
             'content-type': 'application/json',
-            'set-cookie': 'agriscan_session=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; SameSite=Lax',
+            'set-cookie': 'agrivisio_session=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; SameSite=Lax',
           },
         });
       }
@@ -671,7 +671,7 @@ function createSplash() {
 </head>
 <body>
   <div class="logo-box">
-    ${logoSrc ? `<img src="${logoSrc}" class="logo-img" alt="AgriScan">` : '<h1 style="color:#f59e0b;">AGRI SCAN</h1>'}
+    ${logoSrc ? `<img src="${logoSrc}" class="logo-img" alt="AgriVisio">` : '<h1 style="color:#f59e0b;">AGRI VISIO</h1>'}
   </div>
   <div class="progress-wrap">
     <div class="progress-bar"></div>
@@ -689,7 +689,7 @@ function createWindow() {
     height: 920,
     minWidth: 1080,
     minHeight: 720,
-    title: 'AgriScan - Precision Optical Grain Assessment',
+    title: 'AgriVisio - Precision Optical Grain Assessment',
     backgroundColor: '#0d0f14',
     icon: ICON_PATH,
     autoHideMenuBar: true,
@@ -761,9 +761,9 @@ ipcMain.handle('save-report-pdf', async (event, { batchId }) => {
 
   try {
     const safeBatchId = String(batchId || 'summary').replace(/[^a-zA-Z0-9_-]/g, '_');
-    const defaultFilename = `AgriScan-Report-${safeBatchId}.pdf`;
+    const defaultFilename = `AgriVisio-Report-${safeBatchId}.pdf`;
     const { filePath, canceled } = await dialog.showSaveDialog(mainWindow, {
-      title: 'Save AgriScan Assessment Report',
+      title: 'Save AgriVisio Assessment Report',
       defaultPath: path.join(app.getPath('downloads'), defaultFilename),
       filters: [
         { name: 'PDF Documents (*.pdf)', extensions: ['pdf'] },
@@ -794,7 +794,7 @@ ipcMain.handle('save-report-pdf', async (event, { batchId }) => {
 
     return { success: true, filePath, canceled: false };
   } catch (err) {
-    console.error('[AgriScan Desktop] Failed to save report PDF:', err);
+    console.error('[AgriVisio Desktop] Failed to save report PDF:', err);
     return { success: false, error: err.message };
   }
 });
@@ -845,7 +845,7 @@ function stopBackend(callback) {
 
 app.whenReady().then(async () => {
   if (process.platform === 'win32') {
-    app.setAppUserModelId('com.agriscan.ricequalityanalyser');
+    app.setAppUserModelId('com.agrivisio.ricequalityanalyser');
   }
 
   registerProtocolHandler();
@@ -857,7 +857,7 @@ app.whenReady().then(async () => {
     log('FATAL: Could not establish authenticated session. Aborting launch.');
     dialog.showErrorBox(
       'Authentication Failure',
-      'AgriScan could not establish an authenticated local session with the optical engine.\n\nPlease restart the application.'
+      'AgriVisio could not establish an authenticated local session with the optical engine.\n\nPlease restart the application.'
     );
     app.quit();
     return;

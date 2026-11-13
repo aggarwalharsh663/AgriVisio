@@ -1,6 +1,6 @@
-# AgriScan - Precision Optical Grain Assessment & Morphometric Analysis
+# AgriVisio - Precision Optical Grain Assessment & Morphometric Analysis
 
-AgriScan is an enterprise computer vision and machine learning platform engineered for automated rice grain inspection, sub-millimeter morphometric quantification, and commercial grade classification. The system provides an end-to-end optical pipeline combining color reference calibration, adaptive morphological segmentation, and four-class grain defect categorization.
+AgriVisio is an enterprise computer vision and machine learning platform engineered for automated rice grain inspection, sub-millimeter morphometric quantification, and commercial grade classification. The system provides an end-to-end optical pipeline combining color reference calibration, adaptive morphological segmentation, and four-class grain defect categorization.
 
 ---
 
@@ -89,8 +89,8 @@ agriscan/
 │   ├── report_validation.md  # Formal model validation report
 │   ├── security.md           # Security architecture and threat model
 │   └── remediation_report.md # Security remediation audit report
-├── AgriScan.exe              # Native Windows launcher
-├── AgriScanSetup.exe         # Verified Windows installer binary
+├── AgriVisio.exe             # Native Windows launcher
+├── AgriVisioSetup.exe        # Verified Windows installer binary
 ├── setup_form.cs             # C# installer source with fail-closed SHA-256 check
 ├── requirements.txt          # Exact pinned Python package dependencies
 ├── start.bat                 # Windows quickstart launcher script
@@ -124,14 +124,14 @@ npm ci
 cd ..
 ```
 
-### 3. Launching AgriScan Desktop
+### 3. Launching AgriVisio Desktop
 Run the native launcher directly:
 ```powershell
-.\AgriScan.exe
+.\AgriVisio.exe
 ```
 Or execute the automated batch launcher:
 ```powershell
-.\AgriScan.bat
+.\AgriVisio.bat
 ```
 
 ---
@@ -139,12 +139,12 @@ Or execute the automated batch launcher:
 ## Security Architecture & Configuration
 
 ### Authentication Flow
-AgriScan implements a multi-tier authentication model:
+AgriVisio implements a multi-tier authentication model:
 1. **Desktop IPC Mode**: Electron communicates directly with the Python computer vision worker over protected standard input/output pipes (`stdio`), eliminating local network listening ports.
 2. **Browser / Web API Mode**: Protected endpoints require authentication via:
-   - `X-AgriScan-Token: <token>` HTTP header, or
+   - `X-AgriVisio-Token: <token>` (or `X-AgriScan-Token`) HTTP header, or
    - `Authorization: Bearer <token>` HTTP header, or
-   - `agriscan_session` cookie (`HttpOnly=True`, `SameSite=Lax`, `Path=/`).
+   - `agrivisio_session` (or `agriscan_session`) cookie (`HttpOnly=True`, `SameSite=Lax`, `Path=/`).
    - *Query-token authentication (`?token=...`) is strictly rejected* to prevent token exposure in URLs, browser history, or logs.
 3. **One-Time Bootstrap Protocol**: Arbitrary localhost HTTP callers cannot retrieve master API tokens. When initializing sessions, clients exchange a single-use, 30-second ephemeral bootstrap secret via `POST /api/auth/bootstrap`.
 
