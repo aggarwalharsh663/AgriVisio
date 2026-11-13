@@ -2,8 +2,13 @@
 
 import argparse
 import json
+import sys
 import tempfile
 from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 import cv2
 import joblib
@@ -12,6 +17,7 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 from sklearn.model_selection import GroupShuffleSplit
 
+from backend.calibration import calibrate
 from backend.grain_analysis import (
     FEATURE_NAMES,
     _measure_grain_details,
@@ -88,9 +94,16 @@ def _collect_training_data(
                     lighting=lighting,
                     out_dir=str(scene_dir),
                 )
-                image = cv2.imread(scene["photo_path"])
+                calibrated_path = scene_dir / "calibrated.jpg"
+                calibrate(
+                    scene["photo_path"],
+                    scene["card_patches"],
+                    scene["card_true_rgb"],
+                    str(calibrated_path),
+                )
+                image = cv2.imread(str(calibrated_path))
                 if image is None:
-                    raise OSError(f"Could not read generated scene: {scene['photo_path']}")
+                    raise OSError(f"Could not read calibrated scene: {calibrated_path}")
                 ground_truth = json.loads(
                     Path(scene["ground_truth_path"]).read_text(encoding="utf-8")
                 )["grains"]

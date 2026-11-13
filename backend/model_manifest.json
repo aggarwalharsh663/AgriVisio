@@ -2,8 +2,8 @@
   "artifact_name": "model.joblib",
   "model_version": "1.0.0",
   "architecture": "RandomForestClassifier(n_estimators=300, min_samples_leaf=2, class_weight='balanced_subsample')",
-  "sha256": "90ad4a263d28f5d1414ede8241751c9dc2949e60966857acfdfc781d22489dfa",
-  "size_bytes": 8192553,
+  "sha256": "1c8de55a89860486b6bea1806d3faef776a181c2132f7a79ec1d749b7d01d968",
+  "size_bytes": 9287145,
   "classes": ["good", "broken", "chalky", "discolored"],
   "feature_names": [
     "length_mm",

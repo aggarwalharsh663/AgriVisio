@@ -55,8 +55,8 @@ BLUR_KERNEL_SIZE = (5, 5)
 OPENING_KERNEL_SIZE = (3, 3)
 MIN_GRAIN_AREA = 80
 MIN_THRESHOLD_BRIGHTNESS = 50
-BRIGHT_VALUE_THRESHOLD = 200
-LOW_SATURATION_THRESHOLD = 50
+BRIGHT_VALUE_THRESHOLD = 220
+LOW_SATURATION_THRESHOLD = 8
 LOW_CONFIDENCE_THRESHOLD = 0.6
 FEATURE_NAMES = (
     "length_mm",
@@ -117,16 +117,21 @@ def _measure_grain_details(
     grain_hsv = cv2.cvtColor(
         grain_bgr.reshape(-1, 1, 3), cv2.COLOR_BGR2HSV
     ).reshape(-1, 3)
+    grain_rgb = grain_bgr[:, ::-1]
     if is_blue_tray:
-        # In flatbed scanner light (Epson Perfection V600 / blue optical tray),
-        # chalky regions show high value / opacity with low saturation.
-        chalk_pixels = (grain_hsv[:, 2] >= 180) & (grain_hsv[:, 1] <= 38)
+        # In flatbed scanner light (blue optical tray), chalky regions are opaque white,
+        # reflecting light and blocking the blue background (higher red, low saturation).
+        chalk_pixels = (grain_rgb[:, 0] >= 170) & (grain_hsv[:, 1] <= 42) & (grain_hsv[:, 2] >= 180)
     else:
+        # In optical chamber and standard photos, chalky endosperm is opaque neutral white:
+        # high brightness, very low color saturation, and minimal channel spread.
+        rgb_spread = grain_rgb.max(axis=1) - grain_rgb.min(axis=1)
         chalk_pixels = (
             (grain_hsv[:, 2] >= BRIGHT_VALUE_THRESHOLD)
             & (grain_hsv[:, 1] <= LOW_SATURATION_THRESHOLD)
+            & (rgb_spread <= 10)
         )
-    mean_rgb = grain_bgr[:, ::-1].mean(axis=0)
+    mean_rgb = grain_rgb.mean(axis=0)
     measurement = {
         "length_mm": round(float(length_mm), 3),
         "width_mm": round(float(width_mm), 3),
@@ -349,7 +354,12 @@ def measure_grain(
     contour: np.ndarray, image: np.ndarray, mm_per_pixel: float
 ) -> dict:
     """Measure one contour and return dimensions, colour, and shape features."""
-    measurement, _ = _measure_grain_details(contour, image, mm_per_pixel)
+    b_chan = image[:, :, 0]
+    r_chan = image[:, :, 2]
+    is_blue_tray = float(np.median(b_chan)) > float(np.median(r_chan)) + 35
+    measurement, _ = _measure_grain_details(
+        contour, image, mm_per_pixel, is_blue_tray=is_blue_tray
+    )
     return measurement
 
 
@@ -457,27 +467,30 @@ def _analyze_image(
             zip(details, probabilities), start=1
         ):
             if is_blue_tray:
-                # Broken threshold matches Micron Analyzer (broken / short fragments)
-                broken_threshold = 5.81 if batch_median < 7.8 else 2.50
-                chalk_threshold = 0.85 if batch_median < 5.0 else (0.69 if batch_median < 7.8 else 0.69)
-                discolor_threshold = 157.0 if batch_median < 5.0 else 152.0
-                if np.mean(measurement["mean_rgb"]) < discolor_threshold:
+                # Broken threshold matches 75% whole-grain agronomic standard
+                broken_threshold = max(2.50, batch_median * 0.75) if batch_median else 5.50
+                # Chalky threshold matches IRRI/USDA standard (>= 20% chalkiness)
+                chalk_threshold = 0.20
+                discolor_threshold = 155.0
+                mean_intensity = float(np.mean(measurement["mean_rgb"]))
+                mean_r, _, mean_b = measurement["mean_rgb"]
+                if mean_intensity < discolor_threshold or (mean_r > mean_b + 40):
                     label = "discolored"
-                    confidence = 0.90
+                    confidence = 0.92
                     reason_text = (
-                        f"Darker discolored kernel (mean RGB {np.mean(measurement['mean_rgb']):.1f} < {discolor_threshold})."
+                        f"Discolored / damaged kernel (mean RGB {mean_intensity:.1f} < {discolor_threshold} or yellow/brown stain)."
                     )
                 elif measurement["chalk_fraction"] >= chalk_threshold:
                     label = "chalky"
-                    confidence = 0.92
+                    confidence = 0.94
                     reason_text = (
-                        f"High opacity / chalky fraction ({measurement['chalk_fraction']*100:.1f}% >= 65%)."
+                        f"Chalky kernel ({measurement['chalk_fraction']*100:.1f}% >= {chalk_threshold*100:.0f}% chalkiness)."
                     )
                 elif measurement["length_mm"] < broken_threshold:
                     label = "broken"
                     confidence = 0.95
                     reason_text = (
-                        f"Grain length {measurement['length_mm']:.2f} mm is below whole-grain threshold."
+                        f"Broken grain length {measurement['length_mm']:.2f} mm (< {broken_threshold:.2f} mm)."
                     )
                 else:
                     label = "good"
