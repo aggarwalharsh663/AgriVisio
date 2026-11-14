@@ -122,7 +122,7 @@ def build_installer(output_exe: Path | None = None) -> Path:
             for fname in [
                 "AgriVisio.bat", "AgriScan.bat",
                 "AgriVisio.exe", "AgriScan.exe",
-                "app_icon.ico", "LICENSE", "README.md", "requirements.txt",
+                "app_icon.ico", "agrivisio_icon.ico", "LICENSE", "README.md", "requirements.txt",
             ]:
                 fpath = ROOT_DIR / fname
                 if fpath.is_file():

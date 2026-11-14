@@ -39,7 +39,7 @@ namespace AgriVisioSetup
 
         // Configurable expected SHA-256 checksum for agriscan_payload.zip
         // If empty or null, integrity verification uses embedded manifest or validates stream readable
-        public static string ExpectedPayloadSha256 = "C7415854A89D3B8B0ABB3BB40B0E4065F0120E57B1B9BCF4AE3B9895810F6B2D";
+        public static string ExpectedPayloadSha256 = "FC5F45281DA7670E0D6C8B7BE49268112D2D04233824ADA722380CC0D4C9422A";
 
                 /// <summary>
         /// Constant-time comparison of two hex hash strings to prevent timing side-channels (S-03).
@@ -565,7 +565,7 @@ namespace AgriVisioSetup
             try
             {
                 string exePath = File.Exists(Path.Combine(targetDir, "AgriVisio.exe")) ? Path.Combine(targetDir, "AgriVisio.exe") : Path.Combine(targetDir, "AgriScan.exe");
-                string iconPath = Path.Combine(targetDir, "app_icon.ico");
+                string iconPath = File.Exists(Path.Combine(targetDir, "agrivisio_icon.ico")) ? Path.Combine(targetDir, "agrivisio_icon.ico") : Path.Combine(targetDir, "app_icon.ico");
                 string desktopPath = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
                 string shortcutPath = Path.Combine(desktopPath, "AgriVisio.lnk");
 
