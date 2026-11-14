@@ -586,14 +586,14 @@ function registerProtocolHandler() {
 }
 function createSplash() {
   splashWindow = new BrowserWindow({
-    width: 480,
-    height: 320,
+    width: 440,
+    height: 330,
     frame: false,
     resizable: false,
     center: true,
     show: true,
     alwaysOnTop: true,
-    backgroundColor: '#0d0f14',
+    backgroundColor: '#0b0f17',
     icon: ICON_PATH,
     webPreferences: {
       nodeIntegration: false,
@@ -610,7 +610,7 @@ function createSplash() {
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
   body {
-    background: #0d0f14;
+    background: #0b0f17;
     color: #f8fafc;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     display: flex;
@@ -618,39 +618,41 @@ function createSplash() {
     align-items: center;
     justify-content: center;
     height: 100vh;
-    border: 2px solid #2d354d;
-    border-radius: 14px;
+    border: 1px solid #1e293b;
+    border-radius: 16px;
     overflow: hidden;
     position: relative;
     padding: 24px;
-    background-image: radial-gradient(circle at 50% 45%, rgba(245, 158, 11, 0.16) 0%, transparent 65%);
+    background-image: radial-gradient(circle at 50% 36%, rgba(34, 197, 94, 0.14) 0%, transparent 68%);
   }
   .logo-box {
     margin-bottom: 20px;
     display: flex;
     justify-content: center;
+    align-items: center;
   }
   .logo-img {
-    max-width: 280px;
-    height: auto;
+    width: 140px;
+    height: 140px;
+    object-fit: contain;
     display: block;
-    filter: drop-shadow(0 8px 24px rgba(0,0,0,0.6));
+    filter: drop-shadow(0 10px 22px rgba(0,0,0,0.55));
   }
   .progress-wrap {
-    width: 280px;
-    height: 6px;
-    background: #171b26;
+    width: 260px;
+    height: 5px;
+    background: #111827;
     border-radius: 6px;
     overflow: hidden;
     position: relative;
-    border: 1px solid #2d354d;
+    border: 1px solid #1f2937;
     margin-bottom: 14px;
   }
   .progress-bar {
     position: absolute;
     top: 0; left: 0; bottom: 0;
-    width: 40%;
-    background: #f59e0b;
+    width: 38%;
+    background: linear-gradient(90deg, #10b981, #22c55e, #84cc16);
     border-radius: 6px;
     animation: slide 1.4s ease-in-out infinite;
   }
@@ -660,18 +662,19 @@ function createSplash() {
     100% { left: 100%; width: 25%; }
   }
   .status {
-    font-size: 11px;
+    font-size: 10.5px;
     color: #94a3b8;
     font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-    font-weight: 700;
-    letter-spacing: 0.1em;
+    font-weight: 600;
+    letter-spacing: 0.12em;
     text-transform: uppercase;
+    text-align: center;
   }
 </style>
 </head>
 <body>
   <div class="logo-box">
-    ${logoSrc ? `<img src="${logoSrc}" class="logo-img" alt="AgriVisio">` : '<h1 style="color:#f59e0b;">AGRI VISIO</h1>'}
+    ${logoSrc ? `<img src="${logoSrc}" class="logo-img" alt="AgriVisio">` : '<h1 style="color:#22c55e;">AGRI VISIO</h1>'}
   </div>
   <div class="progress-wrap">
     <div class="progress-bar"></div>

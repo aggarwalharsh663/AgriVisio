@@ -84,7 +84,7 @@ def compute_sha256(file_path: Path) -> str:
 def build_installer(output_exe: Path | None = None) -> Path:
     out_target = output_exe or (ROOT_DIR / "AgriVisioSetup.exe")
     setup_cs = ROOT_DIR / "setup_form.cs"
-    icon_ico = ROOT_DIR / "app_icon.ico"
+    icon_ico = ROOT_DIR / "agrivisio_icon.ico" if (ROOT_DIR / "agrivisio_icon.ico").is_file() else (ROOT_DIR / "app_icon.ico")
     installer_manifest = ROOT_DIR / "installer.manifest"
 
     if not setup_cs.is_file():
@@ -167,6 +167,7 @@ def build_installer(output_exe: Path | None = None) -> Path:
             "/reference:System.IO.Compression.dll",
             "/reference:System.IO.Compression.FileSystem.dll",
             f"/resource:{tmp_payload},agriscan_payload.zip",
+            f"/resource:{ROOT_DIR / 'frontend' / 'assets' / 'emblem.png'},app_emblem.png",
             str(setup_cs),
         ]
 

@@ -39,7 +39,7 @@ namespace AgriVisioSetup
 
         // Configurable expected SHA-256 checksum for agriscan_payload.zip
         // If empty or null, integrity verification uses embedded manifest or validates stream readable
-        public static string ExpectedPayloadSha256 = "FC5F45281DA7670E0D6C8B7BE49268112D2D04233824ADA722380CC0D4C9422A";
+        public static string ExpectedPayloadSha256 = "CE7B539A11D7DB61C83BAA7D04031716FAEE0EC8862D8FA23F5BB80590624ADA";
 
                 /// <summary>
         /// Constant-time comparison of two hex hash strings to prevent timing side-channels (S-03).
@@ -79,28 +79,65 @@ namespace AgriVisioSetup
 
             try
             {
-                string iconPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "app_icon.ico");
+                this.Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+            }
+            catch
+            {
+                string iconPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "agrivisio_icon.ico");
+                if (!File.Exists(iconPath)) iconPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "app_icon.ico");
                 if (File.Exists(iconPath))
                 {
                     this.Icon = new Icon(iconPath);
                 }
             }
+
+            PictureBox picLogo = new PictureBox();
+            picLogo.Location = new Point(30, 20);
+            picLogo.Size = new Size(56, 56);
+            picLogo.SizeMode = PictureBoxSizeMode.Zoom;
+            try
+            {
+                using (Stream stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("app_emblem.png"))
+                {
+                    if (stream != null)
+                    {
+                        picLogo.Image = Image.FromStream(stream);
+                    }
+                }
+            }
             catch { }
+            if (picLogo.Image == null)
+            {
+                try
+                {
+                    string emblemPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "frontend", "assets", "emblem.png");
+                    if (File.Exists(emblemPath))
+                    {
+                        picLogo.Image = Image.FromFile(emblemPath);
+                    }
+                    else if (this.Icon != null)
+                    {
+                        picLogo.Image = this.Icon.ToBitmap();
+                    }
+                }
+                catch { }
+            }
+            this.Controls.Add(picLogo);
 
             lblTitle = new Label();
             lblTitle.Text = "AgriVisio Setup";
             lblTitle.Font = new Font("Segoe UI", 18, FontStyle.Bold);
-            lblTitle.ForeColor = Color.FromArgb(245, 158, 11);
-            lblTitle.Location = new Point(30, 25);
-            lblTitle.Size = new Size(500, 38);
+            lblTitle.ForeColor = Color.FromArgb(34, 197, 94);
+            lblTitle.Location = new Point(98, 20);
+            lblTitle.Size = new Size(430, 32);
             this.Controls.Add(lblTitle);
 
             lblDesc = new Label();
             lblDesc.Text = "Install AgriVisio Precision Optical Grain Assessment desktop application on this computer.";
             lblDesc.Font = new Font("Segoe UI", 9.5f, FontStyle.Regular);
             lblDesc.ForeColor = Color.FromArgb(148, 163, 184);
-            lblDesc.Location = new Point(32, 68);
-            lblDesc.Size = new Size(500, 35);
+            lblDesc.Location = new Point(100, 54);
+            lblDesc.Size = new Size(430, 38);
             this.Controls.Add(lblDesc);
 
             Label lblPathTag = new Label();
@@ -187,7 +224,7 @@ namespace AgriVisioSetup
             btnInstall.Location = new Point(364, 325);
             btnInstall.Size = new Size(170, 40);
             btnInstall.FlatStyle = FlatStyle.Flat;
-            btnInstall.BackColor = Color.FromArgb(245, 158, 11);
+            btnInstall.BackColor = Color.FromArgb(34, 197, 94);
             btnInstall.ForeColor = Color.FromArgb(13, 15, 20);
             btnInstall.Cursor = Cursors.Hand;
             btnInstall.Click += BtnInstall_Click;
