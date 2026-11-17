@@ -1109,8 +1109,8 @@
 
 	initAuth();
 	initTheme();
-	// Default to scanner mode
-	scanSource.value = "scanner";
+	// Default to simulated mode
+	scanSource.value = "simulated";
 	updateScanSource();
 	// Desktop app heartbeat watcher
 	function sendHeartbeat() {
