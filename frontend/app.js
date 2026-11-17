@@ -125,13 +125,56 @@
 	}
 
 	async function runChamberEffects() {
+		const chamberFigure = document.querySelector("#chamber-figure");
+		if (chamberFigure) {
+			chamberFigure.scrollIntoView({ behavior: "smooth", block: "center" });
+			await new Promise((resolve) => setTimeout(resolve, 350));
+		}
 		const chamber = window.Chamber;
 		if (!chamber) return;
-		const lighting = document.querySelector("#lighting").value;
+		const lighting = document.querySelector("#lighting")?.value || "ring_light";
 		if (typeof chamber.setLighting === "function") chamber.setLighting(lighting);
-		if (typeof chamber.pourRice === "function") chamber.pourRice();
+
+		if (typeof chamber.pourRice === "function") {
+			await new Promise((resolve) => {
+				let resolved = false;
+				const timer = setTimeout(() => {
+					if (!resolved) {
+						resolved = true;
+						resolve();
+					}
+				}, 3200);
+
+				try {
+					chamber.pourRice(() => {
+						if (!resolved) {
+							resolved = true;
+							clearTimeout(timer);
+							resolve();
+						}
+					});
+				} catch (e) {
+					if (typeof chamber.restartRice === "function") {
+						try {
+							chamber.restartRice(() => {
+								if (!resolved) {
+									resolved = true;
+									clearTimeout(timer);
+									resolve();
+								}
+							});
+							return;
+						} catch (err) {}
+					}
+					clearTimeout(timer);
+					resolve();
+				}
+			});
+		}
+
 		if (typeof chamber.cameraFlash === "function") {
 			await new Promise((resolve) => chamber.cameraFlash(resolve));
+			await new Promise((resolve) => setTimeout(resolve, 200));
 		}
 	}
 
