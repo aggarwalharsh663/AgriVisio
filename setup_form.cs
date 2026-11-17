@@ -39,7 +39,7 @@ namespace AgriVisioSetup
 
         // Configurable expected SHA-256 checksum for agriscan_payload.zip
         // If empty or null, integrity verification uses embedded manifest or validates stream readable
-        public static string ExpectedPayloadSha256 = "CE7B539A11D7DB61C83BAA7D04031716FAEE0EC8862D8FA23F5BB80590624ADA";
+        public static string ExpectedPayloadSha256 = "8F93BFB67CE89C4D37D3A0345AF660C2EE553DD03BDD4BDF62EAB9B22DBFA007";
 
                 /// <summary>
         /// Constant-time comparison of two hex hash strings to prevent timing side-channels (S-03).
@@ -602,6 +602,8 @@ namespace AgriVisioSetup
             try
             {
                 string exePath = File.Exists(Path.Combine(targetDir, "AgriVisio.exe")) ? Path.Combine(targetDir, "AgriVisio.exe") : Path.Combine(targetDir, "AgriScan.exe");
+                string electronExe = Path.Combine(targetDir, "electron", "dist", "electron.exe");
+                string mainScript = Path.Combine(targetDir, "electron", "main.cjs");
                 string iconPath = File.Exists(Path.Combine(targetDir, "agrivisio_icon.ico")) ? Path.Combine(targetDir, "agrivisio_icon.ico") : Path.Combine(targetDir, "app_icon.ico");
                 string desktopPath = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
                 string shortcutPath = Path.Combine(desktopPath, "AgriVisio.lnk");
@@ -610,7 +612,15 @@ namespace AgriVisioSetup
                 // Avoids Windows Script Host and dynamic script execution (Issue 3 / ASR rules)
                 IShellLinkW link = (IShellLinkW)new ShellLink();
                 link.SetDescription("AgriVisio - Precision Optical Grain Assessment");
-                link.SetPath(exePath);
+                if (File.Exists(electronExe) && File.Exists(mainScript))
+                {
+                    link.SetPath(electronExe);
+                    link.SetArguments("\"" + mainScript + "\"");
+                }
+                else
+                {
+                    link.SetPath(exePath);
+                }
                 link.SetWorkingDirectory(targetDir);
                 if (File.Exists(iconPath))
                 {
@@ -701,8 +711,19 @@ namespace AgriVisioSetup
         {
             try
             {
+                string electronExe = Path.Combine(targetDir, "electron", "dist", "electron.exe");
+                string mainScript = Path.Combine(targetDir, "electron", "main.cjs");
                 string exePath = File.Exists(Path.Combine(targetDir, "AgriVisio.exe")) ? Path.Combine(targetDir, "AgriVisio.exe") : Path.Combine(targetDir, "AgriScan.exe");
-                if (File.Exists(exePath))
+
+                if (File.Exists(electronExe) && File.Exists(mainScript))
+                {
+                    ProcessStartInfo psi = new ProcessStartInfo();
+                    psi.FileName = electronExe;
+                    psi.Arguments = "\"" + mainScript + "\"";
+                    psi.WorkingDirectory = targetDir;
+                    Process.Start(psi);
+                }
+                else if (File.Exists(exePath))
                 {
                     ProcessStartInfo psi = new ProcessStartInfo();
                     psi.FileName = exePath;
