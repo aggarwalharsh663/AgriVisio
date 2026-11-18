@@ -55,8 +55,8 @@ BLUR_KERNEL_SIZE = (5, 5)
 OPENING_KERNEL_SIZE = (3, 3)
 MIN_GRAIN_AREA = 80
 MIN_THRESHOLD_BRIGHTNESS = 50
-BRIGHT_VALUE_THRESHOLD = 220
-LOW_SATURATION_THRESHOLD = 8
+BRIGHT_VALUE_THRESHOLD = 238
+LOW_SATURATION_THRESHOLD = 12
 LOW_CONFIDENCE_THRESHOLD = 0.6
 FEATURE_NAMES = (
     "length_mm",
@@ -121,15 +121,20 @@ def _measure_grain_details(
     if is_blue_tray:
         # In flatbed scanner light (blue optical tray), chalky regions are opaque white,
         # reflecting light and blocking the blue background (higher red, low saturation).
-        chalk_pixels = (grain_rgb[:, 0] >= 170) & (grain_hsv[:, 1] <= 42) & (grain_hsv[:, 2] >= 180)
+        chalk_pixels = (
+            (grain_rgb[:, 0] >= 150)
+            & (grain_hsv[:, 1] <= 55)
+            & (grain_hsv[:, 2] >= 155)
+            & (grain_rgb[:, 0] > grain_rgb[:, 2] - 25)
+        )
     else:
         # In optical chamber and standard photos, chalky endosperm is opaque neutral white:
-        # high brightness, very low color saturation, and minimal channel spread.
+        # high brightness, low color saturation, and minimal channel spread.
         rgb_spread = grain_rgb.max(axis=1) - grain_rgb.min(axis=1)
         chalk_pixels = (
             (grain_hsv[:, 2] >= BRIGHT_VALUE_THRESHOLD)
             & (grain_hsv[:, 1] <= LOW_SATURATION_THRESHOLD)
-            & (rgb_spread <= 10)
+            & (rgb_spread <= 11)
         )
     mean_rgb = grain_rgb.mean(axis=0)
     measurement = {
@@ -466,14 +471,15 @@ def _analyze_image(
         for grain_id, ((measurement, _), row_probabilities) in enumerate(
             zip(details, probabilities), start=1
         ):
+            # Broken threshold matches 75% whole-grain agronomic standard
+            broken_threshold = max(2.50, batch_median * 0.75) if batch_median else 5.50
+            # Chalky threshold matches IRRI/USDA standard (>= 20% chalkiness)
+            chalk_threshold = 0.20
+            discolor_threshold = 155.0
+            mean_intensity = float(np.mean(measurement["mean_rgb"]))
+            mean_r, mean_g, mean_b = measurement["mean_rgb"]
+
             if is_blue_tray:
-                # Broken threshold matches 75% whole-grain agronomic standard
-                broken_threshold = max(2.50, batch_median * 0.75) if batch_median else 5.50
-                # Chalky threshold matches IRRI/USDA standard (>= 20% chalkiness)
-                chalk_threshold = 0.20
-                discolor_threshold = 155.0
-                mean_intensity = float(np.mean(measurement["mean_rgb"]))
-                mean_r, _, mean_b = measurement["mean_rgb"]
                 if mean_intensity < discolor_threshold or (mean_r > mean_b + 40):
                     label = "discolored"
                     confidence = 0.92
@@ -500,11 +506,41 @@ def _analyze_image(
                     )
             else:
                 best_index = int(np.argmax(row_probabilities))
-                label = str(classes[best_index])
-                confidence = float(row_probabilities[best_index])
-                reason_text = _reason(
-                    label, measurement, batch_median, model, top_features
-                )
+                ml_label = str(classes[best_index])
+                ml_conf = float(row_probabilities[best_index])
+
+                # Adhere strictly to agronomic grading standards (IRRI / USDA / ISO 7301):
+                # 1. Discoloration / microbial stain
+                if ml_label == "discolored" or (mean_r > mean_b + 55 and mean_g < 190):
+                    label = "discolored"
+                    confidence = ml_conf if ml_label == "discolored" else 0.91
+                    reason_text = _reason(
+                        label, measurement, batch_median, model, top_features
+                    )
+                # 2. Chalky kernel standard: >= 20% chalkiness
+                elif measurement["chalk_fraction"] >= chalk_threshold:
+                    label = "chalky"
+                    confidence = max(
+                        ml_conf,
+                        min(0.98, 0.85 + float(measurement["chalk_fraction"]) * 0.15),
+                    )
+                    reason_text = (
+                        f"Chalky kernel ({measurement['chalk_fraction']*100:.1f}% >= {chalk_threshold*100:.0f}% chalkiness threshold)."
+                    )
+                # 3. Broken grain: length < 75% of batch median or model prediction
+                elif measurement["length_mm"] < broken_threshold or ml_label == "broken":
+                    label = "broken"
+                    confidence = ml_conf if ml_label == "broken" else 0.95
+                    reason_text = (
+                        f"Broken grain length {measurement['length_mm']:.2f} mm (< {broken_threshold:.2f} mm)."
+                    )
+                # 4. Sound whole grain
+                else:
+                    label = "good"
+                    confidence = ml_conf if ml_label == "good" else 0.94
+                    reason_text = _reason(
+                        "good", measurement, batch_median, model, top_features
+                    )
             grain = {
                 "id": grain_id,
                 **measurement,

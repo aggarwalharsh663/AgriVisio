@@ -38,12 +38,19 @@ def calibrate(photo_path, card_patches, card_true_rgb, out_path):
     if true_rgb.shape != (len(card_patches), 3):
         raise ValueError("card_true_rgb must contain one RGB triplet per card patch")
 
+    h, w = image_rgb.shape[:2]
+    yy, xx = np.mgrid[0:h, 0:w]
+    vignette = (1.0 - 0.25 * (((xx - w / 2) / (w / 2)) ** 2 + ((yy - h / 2) / (h / 2)) ** 2))[..., None].astype(np.float32)
+    flat_rgb = np.clip(image_rgb.astype(np.float32) / np.maximum(vignette, 0.1), 0, 255)
+
     measured = _patch_means(image_rgb, card_patches)
-    matrix, *_ = np.linalg.lstsq(_features(measured), true_rgb, rcond=None)
     patch_error_before = _patch_error(measured, true_rgb)
 
+    measured_flat = _patch_means(flat_rgb, card_patches)
+    matrix, *_ = np.linalg.lstsq(_features(measured_flat), true_rgb, rcond=None)
+
     corrected_rgb = np.clip(
-        image_rgb.astype(np.float32) @ matrix[:3] + matrix[3], 0, 255
+        flat_rgb @ matrix[:3] + matrix[3], 0, 255
     ).astype(np.uint8)
     corrected_measured = _patch_means(corrected_rgb, card_patches)
     patch_error_after = _patch_error(corrected_measured, true_rgb)
