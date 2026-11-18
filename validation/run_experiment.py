@@ -32,14 +32,14 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 def _run_scans() -> list[dict]:
     """Call the real scan endpoint while keeping generated files temporary."""
     rows = []
-    with tempfile.TemporaryDirectory(prefix="agriscan_experiment_") as temp_dir:
+    with tempfile.TemporaryDirectory(prefix="agrivisio_experiment_") as temp_dir:
         temp_root = Path(temp_dir)
         original_data_dir = backend_main.DATA_DIR
         original_database_path = backend_main.DATABASE_PATH
         original_mock_setting = os.environ.get("MOCK")
         backend_main.DATA_DIR = temp_root / "data"
         backend_main.DATA_DIR.mkdir()
-        backend_main.DATABASE_PATH = temp_root / "agriscan.sqlite3"
+        backend_main.DATABASE_PATH = temp_root / "agrivisio.sqlite3"
         os.environ["MOCK"] = "0"
 
         try:
@@ -48,7 +48,7 @@ def _run_scans() -> list[dict]:
                     for lighting in LIGHTINGS:
                         response = client.post(
                             "/api/scan",
-                            headers={"X-AgriScan-Token": backend_main.get_api_token()},
+                            headers={"X-AgriVisio-Token": backend_main.get_api_token()},
                             json={
                                 "lighting": lighting,
                                 "n_grains": N_GRAINS,

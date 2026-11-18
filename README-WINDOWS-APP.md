@@ -16,7 +16,7 @@ You have three easy ways to launch the Windows app:
    * Runs natively as a clean, windowed application with zero console clutter.
 
 3. **Batch Launcher**:
-   Double-click **`AgriVisio.bat`** (or `AgriScan.bat`) in this folder.
+   Double-click **`AgriVisio.bat`** in this folder.
 
 ---
 

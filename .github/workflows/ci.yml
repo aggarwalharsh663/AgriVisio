@@ -1,8 +1,8 @@
-name: AgriScan CI
+name: AgriVisio CI
 
 on:
   push:
-    branches: [ main, portable-installer, publish-pyproject-toml ]
+    branches: [ main ]
   pull_request:
     branches: [ main ]
 

@@ -1,8 +1,8 @@
-# AgriScan Security Architecture & Threat Model
+# AgriVisio Security Architecture & Threat Model
 
 ## Overview
 
-AgriScan is an optical grain assessment desktop and API application. This document outlines the security architecture, threat model, authentication mechanisms, file containment policies, and cryptographic verification controls implemented across the system.
+AgriVisio is an optical grain assessment desktop and API application. This document outlines the security architecture, threat model, authentication mechanisms, file containment policies, and cryptographic verification controls implemented across the system.
 
 ---
 
@@ -10,15 +10,15 @@ AgriScan is an optical grain assessment desktop and API application. This docume
 
 ### Core Authentication Channels
 1. **Desktop Portless IPC (Primary Desktop Path)**:
-   - When running as an Electron desktop application, AgriScan does not expose loopback network ports for internal communication.
+   - When running as an Electron desktop application, AgriVisio does not expose loopback network ports for internal communication.
    - Electron communicates with the Python computer vision engine (`backend/ipc_worker.py`) using standard input and output pipes (`stdio`), bypassing the network stack entirely.
 2. **Local HTTP API & Web Interface**:
    - FastAPI binds strictly to `127.0.0.1` (loopback).
    - Protected API endpoints (`/api/scan`, `/api/scan/upload`, `/api/batches`, `/files/...`) require authentication.
    - Permitted authentication formats:
-     - Header: `X-AgriScan-Token: <token>`
+     - Header: `X-AgriVisio-Token: <token>`
      - Header: `Authorization: Bearer <token>`
-     - Cookie: `agriscan_session=<token>`
+     - Cookie: `agrivisio_session=<token>`
    - **Query-token authentication (`?token=...`) is strictly removed and prohibited** to prevent secret leakage in access logs, proxy logs, and browser navigation histories.
 
 ### Secure Single-Use Bootstrap Protocol (R-02 / S-01 / S-02)
@@ -32,7 +32,7 @@ To prevent unauthorized loopback processes from discovering or extracting API cr
    - Secret must not have been previously consumed.
    - Secret is consumed atomically and immediately deleted to prevent replay attacks.
 5. **Session Issuance & Token Secrecy**:
-   - The session is established by issuing an `HttpOnly` cookie (`agriscan_session`).
+   - The session is established by issuing an `HttpOnly` cookie (`agrivisio_session`).
    - The HTTP response body contains **only** `{"status": "authenticated"}`. The master API token is **never** disclosed in the HTTP response body or exposed to renderer JavaScript.
 6. **No Free Sessions on Static Resources (S-01)**:
    - Static asset delivery (`/`, `/index.html`, `/app.js`, `/style.css`) does not issue cookies or grant authenticated sessions. An unauthenticated visitor receives static assets but cannot invoke protected APIs or download batch inspection records.
@@ -83,7 +83,7 @@ default-src 'self' app:; script-src 'self' app:; style-src 'self' 'unsafe-inline
 - `webSecurity: true`
 - `allowRunningInsecureContent: false`
 - `navigateOnDragDrop: false`
-- Navigation restrictions: `will-navigate` blocks navigation away from `app://agriscan`; external links open via `shell.openExternal`; `will-attach-webview` prevents untrusted webviews.
+- Navigation restrictions: `will-navigate` blocks navigation away from `app://agrivisio`; external links open via `shell.openExternal`; `will-attach-webview` prevents untrusted webviews.
 
 ### Graceful Child Process Termination
 Forced `taskkill` has been replaced by a graceful multi-step shutdown:
@@ -107,8 +107,8 @@ Forced `taskkill` has been replaced by a graceful multi-step shutdown:
 
 - Mock simulation mode is **strictly OFF by default**.
 - Enabling mock mode requires explicit configuration:
-  `AGRISCAN_ENV=development` AND `MOCK=1`.
-- If `AGRISCAN_ENV=production`, mock simulation is rejected with `HTTP 403 Forbidden`.
+  `AGRIVISIO_ENV=development` AND `MOCK=1`.
+- If `AGRIVISIO_ENV=production`, mock simulation is rejected with `HTTP 403 Forbidden`.
 - Mock inspection records are tagged with `is_mock: true`, `simulated: true`, and prominent UI warning watermarks.
 - Exporting mock data as official inspection certificates is blocked by `GET /api/batches/{batch_id}/export`.
 
@@ -117,8 +117,8 @@ Forced `taskkill` has been replaced by a graceful multi-step shutdown:
 ## 6. Installer Integrity Verification & Packaging Security (R-05 / S-03 / Additional 1)
 
 ### Fail-Closed Constant-Time Payload Verification
-`AgriScanSetup.exe` contains a stamped SHA-256 checksum (`ExpectedPayloadSha256`). During installation:
-1. The embedded payload stream (`agriscan_payload.zip`) is read.
+`AgriVisioSetup.exe` contains a stamped SHA-256 checksum (`ExpectedPayloadSha256`). During installation:
+1. The embedded payload stream (`agrivisio_payload.zip`) is read.
 2. The SHA-256 hash is computed in memory.
 3. Hash verification enforces:
    - `ExpectedPayloadSha256` must be non-empty and a valid 64-character hexadecimal string.

@@ -1,5 +1,5 @@
 """
-Agri Scan: Hardware Simulator (SIMULATED imaging stage)
+AgriVisio: Hardware Simulator (SIMULATED imaging stage)
 
 Stands in for the camera + lighting box until real hardware is ready.
 It generates synthetic top-down photos of rice grains on a dark tray plus a
@@ -7,8 +7,8 @@ printed reference card, photographed under different lighting conditions.
 It also knows the TRUE label of every grain, so the pipeline can be tested.
 
 Usage:
-    python agriscan_hardware_simulator.py generate  --out sim_data --grains 120 --seed 1
-    python agriscan_hardware_simulator.py calib-demo --out sim_data
+    python agrivisio_hardware_simulator.py generate  --out sim_data --grains 120 --seed 1
+    python agrivisio_hardware_simulator.py calib-demo --out sim_data
 
 IMPORTANT (be honest in the demo): everything produced here is SYNTHETIC.
 Do not report accuracy measured on it as real-world accuracy, and do not
@@ -135,7 +135,7 @@ def generate(out, n_grains, seed):
     patches = draw_card(ideal)
     meta = dict(mm_per_pixel=MM_PER_PIXEL, grains=grains,
                 card_patches=patches, card_true_rgb=CARD_COLORS,
-                note="SYNTHETIC DATA from agriscan_hardware_simulator.py")
+                note="SYNTHETIC DATA from agrivisio_hardware_simulator.py")
     for name, params in LIGHTING.items():
         photo = apply_lighting(ideal, params, np.random.default_rng(seed + 7))
         cv2.imwrite(os.path.join(out, f"rice_{name}.jpg"),

@@ -36,12 +36,12 @@ from validation.validate import compare
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-LOGGER = logging.getLogger("agriscan")
+LOGGER = logging.getLogger("agrivisio")
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = PROJECT_ROOT / "frontend"
 DATA_DIR = PROJECT_ROOT / "data"
-DATABASE_PATH = PROJECT_ROOT / "agriscan.sqlite3"
+DATABASE_PATH = PROJECT_ROOT / "agrivisio.sqlite3"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 (DATA_DIR / "batches").mkdir(parents=True, exist_ok=True)
 
@@ -55,19 +55,19 @@ ESTIMATED_MM_PER_PIXEL = 0.12
 # Bootstrap Secret Management (R-02 / S-01 / S-02 / T-01)
 _bootstrap_lock = threading.RLock()
 _bootstrap_secrets: dict[str, dict[str, Any]] = {}
-BOOTSTRAP_SECRET_TTL = float(os.getenv("AGRIVISIO_BOOTSTRAP_TTL") or os.getenv("AGRISCAN_BOOTSTRAP_TTL", "300.0"))  # Default 300s (5m) for browser mode
+BOOTSTRAP_SECRET_TTL = float(os.getenv("AGRIVISIO_BOOTSTRAP_TTL", "300.0"))  # Default 300s (5m) for browser mode
 _last_console_printed_secret: str | None = None
 
 
 def print_bootstrap_banner(secret: str, ttl: float = BOOTSTRAP_SECRET_TTL, reason: str = "") -> None:
     """Print the single-use bootstrap secret and direct URL to the server console (T-01)."""
-    host = os.getenv("AGRIVISIO_HOST") or os.getenv("AGRISCAN_HOST", "127.0.0.1")
-    port = os.getenv("AGRIVISIO_PORT") or os.getenv("AGRISCAN_PORT", "8000")
+    host = os.getenv("AGRIVISIO_HOST", "127.0.0.1")
+    port = os.getenv("AGRIVISIO_PORT", "8000")
     url = f"http://{host}:{port}/?bootstrap={secret}"
     banner = [
         "",
         "=" * 70,
-        " AGRIVISIO / AGRISCAN BROWSER AUTHENTICATION (T-01)",
+        " AGRIVISIO BROWSER AUTHENTICATION (T-01)",
         "=" * 70,
         f" One-time bootstrap secret: {secret}",
         f" Direct login URL:          {url}",
@@ -184,7 +184,7 @@ def consume_bootstrap_secret(secret: str) -> bool:
 
 
 # Register initial bootstrap secret from environment if present
-_initial_secret = os.getenv("AGRIVISIO_BOOTSTRAP_SECRET") or os.getenv("AGRISCAN_BOOTSTRAP_SECRET")
+_initial_secret = os.getenv("AGRIVISIO_BOOTSTRAP_SECRET")
 if _initial_secret:
     register_bootstrap_secret(_initial_secret.strip())
 
@@ -194,7 +194,7 @@ AUTH_TOKEN_FILE = DATA_DIR / ".auth_token"
 
 def get_or_create_api_token() -> str:
     """Retrieve or generate secure authentication token (S-07)."""
-    env_token = os.getenv("AGRIVISIO_API_TOKEN") or os.getenv("AGRISCAN_API_TOKEN")
+    env_token = os.getenv("AGRIVISIO_API_TOKEN")
     if env_token:
         return env_token.strip()
     path = AUTH_TOKEN_FILE
@@ -225,19 +225,17 @@ def get_or_create_api_token() -> str:
 async def verify_api_token(
     request: Request,
     x_agrivisio_token: str | None = Header(None, alias="X-AgriVisio-Token"),
-    x_agriscan_token: str | None = Header(None, alias="X-AgriScan-Token"),
     authorization: str | None = Header(None),
 ) -> str:
     """Verify local API token on protected operations.
 
     Query-token (?token=...) authentication is strictly removed (R-02).
-    Only header tokens (X-AgriVisio-Token / X-AgriScan-Token / Bearer) or HttpOnly session cookie accepted.
+    Only header tokens (X-AgriVisio-Token / Bearer) or HttpOnly session cookie accepted.
     """
 
     expected = get_or_create_api_token()
 
-    header_token = x_agrivisio_token or x_agriscan_token
-    if header_token and secrets.compare_digest(header_token.strip(), expected):
+    if x_agrivisio_token and secrets.compare_digest(x_agrivisio_token.strip(), expected):
         return expected
 
     if authorization and authorization.startswith("Bearer "):
@@ -245,13 +243,13 @@ async def verify_api_token(
         if secrets.compare_digest(bearer, expected):
             return expected
 
-    cookie_token = request.cookies.get("agrivisio_session") or request.cookies.get("agriscan_session")
+    cookie_token = request.cookies.get("agrivisio_session")
     if cookie_token and secrets.compare_digest(cookie_token.strip(), expected):
         return expected
 
     raise HTTPException(
         status_code=401,
-        detail="Unauthorized: Valid authentication token required. Provide X-AgriVisio-Token, X-AgriScan-Token, Bearer token, or session cookie.",
+        detail="Unauthorized: Valid authentication token required. Provide X-AgriVisio-Token, Bearer token, or session cookie.",
     )
 
 
@@ -294,7 +292,7 @@ class ScanRequest(BaseModel):
 def _next_batch_id() -> str:
     """Defensively generate next batch ID, handling non-integer folders safely."""
     date_part = datetime.now().strftime("%Y%m%d")
-    prefix = f"AS-{date_part}-"
+    prefix = f"AV-{date_part}-"
     with _batch_lock:
         existing = set()
         if DATA_DIR.is_dir():
@@ -332,7 +330,7 @@ def _create_batch_directory() -> tuple[str, Path]:
             if not batch_dir.exists():
                 batch_dir.mkdir(parents=True, exist_ok=False)
                 return batch_id, batch_dir
-        batch_id = f"AS-{datetime.now().strftime('%Y%m%d')}-{uuid4().hex[:6]}"
+        batch_id = f"AV-{datetime.now().strftime('%Y%m%d')}-{uuid4().hex[:6]}"
         batch_dir = DATA_DIR / "batches" / batch_id
         batch_dir.mkdir(parents=True, exist_ok=True)
         return batch_id, batch_dir
@@ -376,10 +374,10 @@ def is_mock_mode_enabled() -> bool:
     """Determine if mock mode is explicitly and safely permitted.
 
     Mock mode is strictly OFF by default (R-07). It is only permitted when
-    AGRISCAN_ENV=development is explicitly configured AND MOCK=1.
-    If AGRISCAN_ENV=production, mock mode is strictly prohibited.
+    AGRIVISIO_ENV=development is explicitly configured AND MOCK=1.
+    If AGRIVISIO_ENV=production, mock mode is strictly prohibited.
     """
-    env = (os.getenv("AGRIVISIO_ENV") or os.getenv("AGRISCAN_ENV", "")).strip().lower()
+    env = os.getenv("AGRIVISIO_ENV", "").strip().lower()
     mock_flag = os.getenv("MOCK", "0").strip().lower()
     if mock_flag in ("1", "true", "yes"):
         if env == "production":
@@ -390,7 +388,7 @@ def is_mock_mode_enabled() -> bool:
         if env != "development":
             raise HTTPException(
                 status_code=403,
-                detail="Mock simulation mode requires explicit development environment (set AGRISCAN_ENV=development and MOCK=1).",
+                detail="Mock simulation mode requires explicit development environment (set AGRIVISIO_ENV=development and MOCK=1).",
             )
         return True
     return False
@@ -400,7 +398,7 @@ def _make_mock_batch(request: ScanRequest) -> dict:
     if not is_mock_mode_enabled():
         raise HTTPException(
             status_code=403,
-            detail="Mock simulation mode requires explicit development environment (set AGRISCAN_ENV=development and MOCK=1).",
+            detail="Mock simulation mode requires explicit development environment (set AGRIVISIO_ENV=development and MOCK=1).",
         )
 
     batch_id, batch_dir = _create_batch_directory()
@@ -755,7 +753,7 @@ async def lifespan(app: FastAPI):
     ensure_active_bootstrap_secret(print_console=True, reason="server startup")
 
     # Validate custom CORS configuration at startup (S-06)
-    raw_cors = os.getenv("AGRIVISIO_ALLOWED_ORIGINS") or os.getenv("AGRISCAN_ALLOWED_ORIGINS")
+    raw_cors = os.getenv("AGRIVISIO_ALLOWED_ORIGINS")
     if raw_cors:
         parse_and_validate_allowed_origins(raw_cors)
 
@@ -800,18 +798,17 @@ DEFAULT_TRUSTED_ORIGINS = [
     "http://127.0.0.1",
     "http://localhost",
     "app://agrivisio",
-    "app://agriscan",
 ]
 
 
 def parse_and_validate_allowed_origins(raw_origins: str | None = None) -> list[str]:
-    """Parse, validate, and filter custom CORS origins from AGRIVISIO_ALLOWED_ORIGINS / AGRISCAN_ALLOWED_ORIGINS (S-06).
+    """Parse, validate, and filter custom CORS origins from AGRIVISIO_ALLOWED_ORIGINS (S-06).
 
     - Outright rejects wildcard '*' or any wildcard patterns to prevent arbitrary cross-origin access.
     - Drops empty values and duplicate origins.
     - Fails loudly with logging when invalid or wildcard values are supplied.
     """
-    raw = raw_origins if raw_origins is not None else (os.getenv("AGRIVISIO_ALLOWED_ORIGINS") or os.getenv("AGRISCAN_ALLOWED_ORIGINS", ""))
+    raw = raw_origins if raw_origins is not None else os.getenv("AGRIVISIO_ALLOWED_ORIGINS", "")
     trusted = list(DEFAULT_TRUSTED_ORIGINS)
     seen = set(trusted)
 
@@ -822,14 +819,14 @@ def parse_and_validate_allowed_origins(raw_origins: str | None = None) -> list[s
                 continue
             if clean == "*" or "*" in clean:
                 LOGGER.error(
-                    "CORS configuration error: rejected wildcard origin '%s' in AGRISCAN_ALLOWED_ORIGINS. "
+                    "CORS configuration error: rejected wildcard origin '%s' in AGRIVISIO_ALLOWED_ORIGINS. "
                     "Wildcard CORS origins are strictly prohibited to prevent cross-origin data theft.",
                     clean,
                 )
                 continue
             if not (clean.startswith("http://") or clean.startswith("https://") or clean.startswith("app://")):
                 LOGGER.error(
-                    "CORS configuration error: rejected invalid origin '%s' in AGRISCAN_ALLOWED_ORIGINS. "
+                    "CORS configuration error: rejected invalid origin '%s' in AGRIVISIO_ALLOWED_ORIGINS. "
                     "Origins must specify protocol (http://, https://, or app://).",
                     clean,
                 )
@@ -908,15 +905,6 @@ def exchange_bootstrap_secret(req: BootstrapRequest, request: Request, response:
         path="/",
         max_age=86400,
     )
-    response.set_cookie(
-        key="agriscan_session",
-        value=token,
-        httponly=True,
-        samesite="lax",
-        secure=is_secure,
-        path="/",
-        max_age=86400,
-    )
     # S-01 / S-02: Never disclose the master token in HTTP response bodies
     return {"status": "authenticated"}
 
@@ -925,10 +913,10 @@ def exchange_bootstrap_secret(req: BootstrapRequest, request: Request, response:
 def auth_status(request: Request):
     """Check whether the current caller possesses a valid authenticated session (T-01)."""
     expected = get_or_create_api_token()
-    cookie_token = request.cookies.get("agrivisio_session") or request.cookies.get("agriscan_session")
+    cookie_token = request.cookies.get("agrivisio_session")
     if cookie_token and secrets.compare_digest(cookie_token.strip(), expected):
         return {"authenticated": True}
-    token_header = request.headers.get("x-agrivisio-token") or request.headers.get("x-agriscan-token")
+    token_header = request.headers.get("x-agrivisio-token")
     if token_header and secrets.compare_digest(token_header.strip(), expected):
         return {"authenticated": True}
     auth_header = request.headers.get("authorization")
@@ -943,12 +931,6 @@ def logout(response: Response):
     """Terminate the authenticated session and clear the session cookie (R-02)."""
     response.delete_cookie(
         key="agrivisio_session",
-        path="/",
-        httponly=True,
-        samesite="lax",
-    )
-    response.delete_cookie(
-        key="agriscan_session",
         path="/",
         httponly=True,
         samesite="lax",
@@ -1188,9 +1170,9 @@ class ProtectedDataFilesApp(StaticFiles):
         # 1. Authenticate every /files request (R-01)
         req = Request(scope)
         expected = get_or_create_api_token()
-        token_header = req.headers.get("x-agrivisio-token") or req.headers.get("x-agriscan-token")
+        token_header = req.headers.get("x-agrivisio-token")
         auth_header = req.headers.get("authorization")
-        cookie_token = req.cookies.get("agrivisio_session") or req.cookies.get("agriscan_session")
+        cookie_token = req.cookies.get("agrivisio_session")
 
         authenticated = False
         if token_header and secrets.compare_digest(token_header.strip(), expected):
@@ -1231,15 +1213,15 @@ class ProtectedDataFilesApp(StaticFiles):
         if not lower.endswith(self.ALLOWED_EXTENSIONS):
             return Response("Not Found", status_code=404)
 
-        # Enforce strict batch directory scope: batches/<valid-batch-id>/... or legacy AS-.../...
+        # Enforce strict batch directory scope: batches/<valid-batch-id>/... or legacy AV-.../AS-.../...
         is_scoped = False
         if norm_parts[0] == "batches" and len(norm_parts) >= 3:
             batch_id = norm_parts[1]
             if re.match(r"^[\w-]+$", batch_id):
                 is_scoped = True
-        elif norm_parts[0].startswith("AS-") and len(norm_parts) >= 2:
+        elif (norm_parts[0].startswith("AV-") or norm_parts[0].startswith("AS-")) and len(norm_parts) >= 2:
             batch_id = norm_parts[0]
-            if re.match(r"^AS-[\w-]+$", batch_id):
+            if re.match(r"^(AV|AS)-[\w-]+$", batch_id):
                 is_scoped = True
 
         if not is_scoped:

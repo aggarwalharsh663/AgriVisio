@@ -56,7 +56,7 @@ def test_real_scan_pipeline_returns_contract_and_saves_to_sqlite(
     tmp_path, monkeypatch, lighting
 ):
     data_dir = tmp_path / "data"
-    database_path = tmp_path / "agriscan.sqlite3"
+    database_path = tmp_path / "agrivisio.sqlite3"
     monkeypatch.setattr(main, "DATA_DIR", data_dir)
     monkeypatch.setattr(main, "DATABASE_PATH", database_path)
     monkeypatch.delenv("MOCK", raising=False)
@@ -67,7 +67,7 @@ def test_real_scan_pipeline_returns_contract_and_saves_to_sqlite(
     monkeypatch.setattr(files_mount, "app", StaticFiles(directory=data_dir))
 
     with TestClient(main.app) as client:
-        client.headers["X-AgriScan-Token"] = main.get_api_token()
+        client.headers["X-AgriVisio-Token"] = main.get_api_token()
         response = client.post(
             "/api/scan",
             json={
@@ -122,7 +122,7 @@ def test_scan_pipeline_failure_returns_clear_json_error(
     tmp_path, monkeypatch
 ):
     monkeypatch.setattr(main, "DATA_DIR", tmp_path / "data")
-    monkeypatch.setattr(main, "DATABASE_PATH", tmp_path / "agriscan.sqlite3")
+    monkeypatch.setattr(main, "DATABASE_PATH", tmp_path / "agrivisio.sqlite3")
     monkeypatch.delenv("MOCK", raising=False)
 
     def fail_scene(*args, **kwargs):
@@ -132,7 +132,7 @@ def test_scan_pipeline_failure_returns_clear_json_error(
 
     monkeypatch.setattr(main, "make_scene", fail_scene)
     with TestClient(main.app) as client:
-        client.headers["X-AgriScan-Token"] = main.get_api_token()
+        client.headers["X-AgriVisio-Token"] = main.get_api_token()
         response = client.post(
             "/api/scan",
             json={

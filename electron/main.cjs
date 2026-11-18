@@ -710,7 +710,7 @@ function createWindow() {
   });
 
   // Zero-port local application loading
-  mainWindow.loadURL('app://agriscan/index.html');
+  mainWindow.loadURL('app://agrivisio/index.html');
 
   const showMainWindow = () => {
     if (splashWindow && !splashWindow.isDestroyed()) {
@@ -736,7 +736,7 @@ function createWindow() {
   mainWindow.webContents.on('will-navigate', (event, navigationUrl) => {
     try {
       const parsedUrl = new URL(navigationUrl);
-      if (parsedUrl.origin !== 'app://agriscan') {
+      if (parsedUrl.origin !== 'app://agrivisio') {
         event.preventDefault();
         if (navigationUrl.startsWith('http://') || navigationUrl.startsWith('https://')) {
           shell.openExternal(navigationUrl);

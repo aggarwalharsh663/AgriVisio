@@ -1,4 +1,4 @@
-"""Deterministic cryptographic batch fingerprinting for AgriScan.
+"""Deterministic cryptographic batch fingerprinting for AgriVisio.
 
 Produces reproducible, collision-resistant fingerprints capturing morphometrics,
 class distribution, calibration metadata, and raw image identity.

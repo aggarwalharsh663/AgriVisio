@@ -12,7 +12,7 @@ from backend.simulator import make_scene
 
 def test_uploaded_photo_is_analyzed_with_an_estimated_scale(tmp_path, monkeypatch):
     data_dir = tmp_path / "data"
-    database_path = tmp_path / "agriscan.sqlite3"
+    database_path = tmp_path / "agrivisio.sqlite3"
     source_dir = tmp_path / "source"
     data_dir.mkdir()
     scene = make_scene(
@@ -31,7 +31,7 @@ def test_uploaded_photo_is_analyzed_with_an_estimated_scale(tmp_path, monkeypatc
     monkeypatch.setattr(files_mount, "app", StaticFiles(directory=data_dir))
 
     with TestClient(main.app) as client:
-        client.headers["X-AgriScan-Token"] = main.get_api_token()
+        client.headers["X-AgriVisio-Token"] = main.get_api_token()
         response = client.post(
             "/api/scan/upload",
             data={
@@ -81,10 +81,10 @@ def test_uploaded_photo_rejects_invalid_image(tmp_path, monkeypatch):
     data_dir = tmp_path / "data"
     data_dir.mkdir()
     monkeypatch.setattr(main, "DATA_DIR", data_dir)
-    monkeypatch.setattr(main, "DATABASE_PATH", tmp_path / "agriscan.sqlite3")
+    monkeypatch.setattr(main, "DATABASE_PATH", tmp_path / "agrivisio.sqlite3")
 
     with TestClient(main.app) as client:
-        client.headers["X-AgriScan-Token"] = main.get_api_token()
+        client.headers["X-AgriVisio-Token"] = main.get_api_token()
         response = client.post(
             "/api/scan/upload",
             data={
@@ -105,7 +105,7 @@ def test_uploaded_photo_detects_dense_grains_across_the_full_frame(
     data_dir = tmp_path / "data"
     data_dir.mkdir()
     monkeypatch.setattr(main, "DATA_DIR", data_dir)
-    monkeypatch.setattr(main, "DATABASE_PATH", tmp_path / "agriscan.sqlite3")
+    monkeypatch.setattr(main, "DATABASE_PATH", tmp_path / "agrivisio.sqlite3")
     files_mount = next(
         route for route in main.app.routes if getattr(route, "path", None) == "/files"
     )
@@ -122,7 +122,7 @@ def test_uploaded_photo_detects_dense_grains_across_the_full_frame(
     assert success
 
     with TestClient(main.app) as client:
-        client.headers["X-AgriScan-Token"] = main.get_api_token()
+        client.headers["X-AgriVisio-Token"] = main.get_api_token()
         response = client.post(
             "/api/scan/upload",
             data={
@@ -144,7 +144,7 @@ def test_uploaded_photo_counts_dense_167_grain_sample(tmp_path, monkeypatch):
     data_dir = tmp_path / "data"
     data_dir.mkdir()
     monkeypatch.setattr(main, "DATA_DIR", data_dir)
-    monkeypatch.setattr(main, "DATABASE_PATH", tmp_path / "agriscan.sqlite3")
+    monkeypatch.setattr(main, "DATABASE_PATH", tmp_path / "agrivisio.sqlite3")
     image = np.full((720, 1200, 3), 24, dtype=np.uint8)
     rng = np.random.default_rng(73)
     for index in range(167):
@@ -157,7 +157,7 @@ def test_uploaded_photo_counts_dense_167_grain_sample(tmp_path, monkeypatch):
     assert success
 
     with TestClient(main.app) as client:
-        client.headers["X-AgriScan-Token"] = main.get_api_token()
+        client.headers["X-AgriVisio-Token"] = main.get_api_token()
         response = client.post(
             "/api/scan/upload",
             data={
@@ -179,7 +179,7 @@ def test_uploaded_blue_tray_photo_uses_calibrated_scale(tmp_path, monkeypatch):
     data_dir = tmp_path / 'data'
     data_dir.mkdir()
     monkeypatch.setattr(main, 'DATA_DIR', data_dir)
-    monkeypatch.setattr(main, 'DATABASE_PATH', tmp_path / 'agriscan.sqlite3')
+    monkeypatch.setattr(main, 'DATABASE_PATH', tmp_path / 'agrivisio.sqlite3')
 
     # Blue tray: B channel high (~240), R channel low (~60)
     image = np.zeros((1000, 800, 3), dtype=np.uint8)
@@ -193,7 +193,7 @@ def test_uploaded_blue_tray_photo_uses_calibrated_scale(tmp_path, monkeypatch):
     assert success
 
     with TestClient(main.app) as client:
-        client.headers["X-AgriScan-Token"] = main.get_api_token()
+        client.headers["X-AgriVisio-Token"] = main.get_api_token()
         # When calibration parameters are provided, it is calibrated
         response = client.post(
             '/api/scan/upload',

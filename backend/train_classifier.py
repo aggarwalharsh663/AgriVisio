@@ -83,7 +83,7 @@ def _collect_training_data(
     labels = []
     groups = []
 
-    with tempfile.TemporaryDirectory(prefix="agriscan-training-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="agrivisio-training-") as temporary:
         for seed_offset in range(scene_count):
             seed = first_seed + seed_offset
             for lighting in LIGHTING:

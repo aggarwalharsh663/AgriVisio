@@ -1,4 +1,4 @@
-# AgriScan Security Remediation & Code Quality Report
+# AgriVisio Security Remediation & Code Quality Report
 
 **Date**: November 9, 2026  
 **Audited Commits**: `dd0a10574337134bdc213ffee0bc2ede990d78c8` (Re-Audit 1), `bb5cbb34858b7c3c26fe1b355f1651d101f62b4b` (Re-Audit 2)  
@@ -8,7 +8,7 @@
 
 ## Executive Summary
 
-This report documents the comprehensive remediation of all security findings and quality recommendations from both the primary security audit and the second security re-audit (*"AgriScan Re-Audit 2 — R-01–R-07 Check and New Findings with PoCs"*). 
+This report documents the comprehensive remediation of all security findings and quality recommendations from both the primary security audit and the second security re-audit (*"AgriVisio Re-Audit 2 — R-01–R-07 Check and New Findings with PoCs"*). 
 
 All security controls operate under fail-closed principles, preserve existing architectural performance, maintain a **100% test pass rate across all 74 automated regression tests**, and provide verified protection across the FastAPI backend, Electron desktop shell, C# Windows installer, and machine learning pipeline.
 
@@ -24,9 +24,9 @@ All security controls operate under fail-closed principles, preserve existing ar
 | **R-02** | Insecure token generation, non-HttpOnly cookie, and query-token authentication | `/api/auth/token` returned master token to any local caller; cookie lacked HttpOnly; query parameter allowed `?token=...` | Removed `/api/auth/token`; created single-use 30s ephemeral bootstrap exchange (`POST /api/auth/bootstrap`); enforced `HttpOnly=True`, `SameSite=Lax`, `Path=/`, and 24h expiration; deleted query-token authentication | `test_arbitrary_localhost_cannot_obtain_token`, `test_bootstrap_secret_exchange_*`, `test_query_token_*` | **FIXED AND VERIFIED** |
 | **R-03** | Internal exception message leakage on `/api/scan` and `/api/scan/upload` | Unhandled runtime exceptions were string-interpolated into API response JSON (`detail: f"...: {exc}"`), exposing internal filesystem paths | Replaced raw exception responses with standardized user-facing messages; full exception tracebacks logged strictly server-side using Python `logging` | `test_scan_error_returns_generic_500`, `test_upload_error_returns_generic_500` | **FIXED AND VERIFIED** |
 | **R-04** | Floating and unpinned dependencies in Python and Electron | Dependencies used `>=` and `^34.0.0`; no committed `package-lock.json` | Pinned exact versions in `requirements.txt` using compatible PyPI releases; pinned `"electron": "34.0.0"`; generated and committed `electron/package-lock.json`; updated CI to test with `npm ci` | `npm ci`, pip dependency validation, and CI workflow | **FIXED AND VERIFIED** |
-| **R-05** | Installer payload SHA-256 verification skipped when empty | `ExpectedPayloadSha256 = ""` in `setup_form.cs` skipped verification when empty | Implemented fail-closed validation in `setup_form.cs` rejecting empty or mismatched hashes; created `scripts/build_installer.py` automatically calculating and embedding payload SHA-256 | `test_installer_fail_closed_hash_verification`, live compilation of `AgriScanSetup.exe` | **FIXED AND VERIFIED** |
-| **R-06** | Electron CSP bypassed and child process terminated with forced taskkill | `bypassCSP: true` in custom scheme; missing CSP headers; `stopBackend()` immediately invoked `taskkill /F` | Removed `bypassCSP: true`; added strict Content-Security-Policy header to `app://agriscan`; implemented graceful stdin shutdown with 3000ms timeout | `test_electron_csp_enforcement_and_graceful_shutdown` | **FIXED AND VERIFIED** |
-| **R-07** | Mock simulation mode enabled by default or permissible in non-development | Setting `MOCK=1` triggered mock data unless `AGRISCAN_ENV=production` | Changed default to OFF; requires both explicit `AGRISCAN_ENV=development` AND `MOCK=1`; rejected in production with HTTP 403; export prohibited | `test_mock_mode_strictly_disabled_by_default` | **FIXED AND VERIFIED** |
+| **R-05** | Installer payload SHA-256 verification skipped when empty | `ExpectedPayloadSha256 = ""` in `setup_form.cs` skipped verification when empty | Implemented fail-closed validation in `setup_form.cs` rejecting empty or mismatched hashes; created `scripts/build_installer.py` automatically calculating and embedding payload SHA-256 | `test_installer_fail_closed_hash_verification`, live compilation of `AgriVisioSetup.exe` | **FIXED AND VERIFIED** |
+| **R-06** | Electron CSP bypassed and child process terminated with forced taskkill | `bypassCSP: true` in custom scheme; missing CSP headers; `stopBackend()` immediately invoked `taskkill /F` | Removed `bypassCSP: true`; added strict Content-Security-Policy header to `app://agrivisio`; implemented graceful stdin shutdown with 3000ms timeout | `test_electron_csp_enforcement_and_graceful_shutdown` | **FIXED AND VERIFIED** |
+| **R-07** | Mock simulation mode enabled by default or permissible in non-development | Setting `MOCK=1` triggered mock data unless `AGRIVISIO_ENV=production` | Changed default to OFF; requires both explicit `AGRIVISIO_ENV=development` AND `MOCK=1`; rejected in production with HTTP 403; export prohibited | `test_mock_mode_strictly_disabled_by_default` | **FIXED AND VERIFIED** |
 
 ---
 
@@ -34,9 +34,9 @@ All security controls operate under fail-closed principles, preserve existing ar
 
 | Finding | Vulnerability / Issue | Root Cause | Implemented Fix | Test Result | Status |
 |---|---|---|---|---|---|
-| **S-01** | Unauthenticated session cookie generation on static requests | `add_security_and_session_headers` middleware issued `agriscan_session` cookie automatically on GET `/`, `.html`, `.css`, and `.js` requests from loopback | Completely removed automatic cookie issuance from middleware. Cookie is issued solely upon successful bootstrap secret exchange. Master token is omitted from HTTP responses | `test_s01_static_requests_never_issue_session_cookie`, `test_s01_cookie_only_auth_fails_without_prior_bootstrap`, `test_s01_bootstrap_session_allows_api_access_without_leaking_token` | **FIXED AND VERIFIED** |
+| **S-01** | Unauthenticated session cookie generation on static requests | `add_security_and_session_headers` middleware issued `agrivisio_session` cookie automatically on GET `/`, `.html`, `.css`, and `.js` requests from loopback | Completely removed automatic cookie issuance from middleware. Cookie is issued solely upon successful bootstrap secret exchange. Master token is omitted from HTTP responses | `test_s01_static_requests_never_issue_session_cookie`, `test_s01_cookie_only_auth_fails_without_prior_bootstrap`, `test_s01_bootstrap_session_allows_api_access_without_leaking_token` | **FIXED AND VERIFIED** |
 | **S-02** | Incomplete Electron-to-Python bootstrap flow | Electron desktop lacked end-to-end bootstrap integration; required portless IPC coordination | Implemented `performElectronBootstrap()` in `electron/main.cjs` using 32-byte crypto secrets over portless stdio IPC (`register_bootstrap` and `bootstrap`). Startup fails closed if bootstrap fails. Added protocol handlers for `/api/auth/bootstrap` and `/api/auth/logout` | `test_s02_ipc_worker_bootstrap_flow`, Electron launch verification | **FIXED AND VERIFIED** |
-| **S-03** | Inaccurate security documentation | Prior documentation stated bootstrap secret came from env/file rather than Electron generation; conflated protocol and HTTP CSP scopes; claimed constant-time hash comparison without code proof | Completely revised `docs/security.md` to reflect real architecture; documented stdio IPC bootstrap lifecycle; separated protocol CSP (`app://agriscan`) from HTTP headers; implemented constant-time `FixedTimeHexEquals` in `setup_form.cs` | `FixedTimeHexEquals` compiled and tested in `setup_form.cs`, `docs/security.md` review | **FIXED AND VERIFIED** |
+| **S-03** | Inaccurate security documentation | Prior documentation stated bootstrap secret came from env/file rather than Electron generation; conflated protocol and HTTP CSP scopes; claimed constant-time hash comparison without code proof | Completely revised `docs/security.md` to reflect real architecture; documented stdio IPC bootstrap lifecycle; separated protocol CSP (`app://agrivisio`) from HTTP headers; implemented constant-time `FixedTimeHexEquals` in `setup_form.cs` | `FixedTimeHexEquals` compiled and tested in `setup_form.cs`, `docs/security.md` review | **FIXED AND VERIFIED** |
 | **S-04** | Outdated testing claims and unverified metrics | Documentation cited earlier 63-test count and omitted execution environment details | Ran genuine automated test suite across all 74 tests; recorded platform versions, test runner logs, compilation hashes, and pass rates in this report | 74 collected, 74 passed, 0 failed in 6.10s | **FIXED AND VERIFIED** |
 | **Additional 1** | Installer packaged `.env` and sensitive credential files | Packaging loop in `scripts/build_installer.py` only excluded specific temporary files | Added regex filters excluding `.env`, `.env.*`, `*.key`, `*.pem`, `*.token`, and `.auth_token`, while permitting `.env.example` and `.env.sample`. Added build-time private key content scan | `test_additional_1_installer_excludes_env_and_keys` | **FIXED AND VERIFIED** |
 | **Additional 2** | Backend `/files` allowed arbitrary 2-segment directory access | `ProtectedDataFilesApp` accepted any path with $\ge 2$ segments regardless of batch scope | Enforced strict batch directory containment: path must start with `batches/<batch_id>/` (with `^[\w-]+$`) or legacy `AS-.../`. Unscoped paths return `HTTP 403 Forbidden` | `test_additional_2_backend_files_scope_tightened` | **FIXED AND VERIFIED** |
@@ -51,7 +51,7 @@ All security controls operate under fail-closed principles, preserve existing ar
 |---|---|---|---|---|---|
 | **T-01** | Browser Mode Authentication Regression | Auto-issued cookie removal in S-01 broke browser launch path (`start.bat`); frontend lacked login UI; bootstrap secret expired after 30s without regenerating | Formatted startup console banner printing bootstrap URL/secret; background task auto-refreshes secret on consumption or expiration; created `#login-modal` and standalone `frontend/login.html`; query parameter `?bootstrap=` safely exchanged without loopback auto-issuance | `test_t01_startup_bootstrap_secret_and_console_banner`, `test_t01_bootstrap_secret_auto_refresh_*`, `test_t01_auth_status_endpoint`, `test_t01_browser_bootstrap_login_flow` | **FIXED AND VERIFIED** |
 | **S-05** | Malformed `batch.json` Crash | Malformed `batch.json` missing `created_at` or `batch_id` crashed `_get_sorted_batch_list`; `get_batch` raised 500 error on corrupt JSON | Handled missing `batch_id`/`created_at`; added `KeyError` to `try...except (OSError, json.JSONDecodeError, KeyError)`; wrapped `get_batch` to degrade cleanly to 404 | `test_s05_sorted_batch_list_ignores_corrupt_or_incomplete_batch_json`, `test_s05_get_batch_corrupt_json_returns_clean_404_not_500` | **FIXED AND VERIFIED** |
-| **S-06** | Wildcard CORS Override | `AGRISCAN_ALLOWED_ORIGINS` allowed `*` wildcard origin reflection and duplicate or invalid entries | Enforced startup validation outright rejecting `*` and wildcard patterns with loud logging; deduplicated entries and required protocol prefix | `test_s06_cors_wildcard_strictly_rejected_with_logging`, `test_s06_cors_filters_empty_and_duplicate_origins`, `test_s06_cors_rejects_schemeless_origins_with_logging` | **FIXED AND VERIFIED** |
+| **S-06** | Wildcard CORS Override | `AGRIVISIO_ALLOWED_ORIGINS` allowed `*` wildcard origin reflection and duplicate or invalid entries | Enforced startup validation outright rejecting `*` and wildcard patterns with loud logging; deduplicated entries and required protocol prefix | `test_s06_cors_wildcard_strictly_rejected_with_logging`, `test_s06_cors_filters_empty_and_duplicate_origins`, `test_s06_cors_rejects_schemeless_origins_with_logging` | **FIXED AND VERIFIED** |
 | **S-07** | Token File Permissions | `data/.auth_token` created with default group-readable permissions (00660) | Enforced `os.chmod(path, 0o600)` immediately after write and on reading legacy tokens to repair permissions | `test_s07_token_file_permissions_enforced_on_write`, `test_s07_token_file_permissions_repaired_on_read` | **FIXED AND VERIFIED** |
 | **Audit-01** | SQLite Corrupt JSON Record Crash | SQLite rows with malformed JSON raised unhandled `JSONDecodeError` in `backend/database.py` | Wrapped `database.get_batch` and `database.list_batches` in `try...except (json.JSONDecodeError, TypeError, KeyError)` to skip corrupt rows; guarded `_get_sorted_batch_list` | `test_database_corrupt_json_handled_gracefully`, `test_sorted_batch_list_with_corrupt_database_row` | **FIXED AND VERIFIED** |
 | **Audit-02** | IPC Worker Upload Size Limit | `handle_scan_upload` lacked explicit file size boundary check on disk | Enforced `os.path.getsize(file_path) > 10 * 1024 * 1024` check raising `ValueError` | `test_ipc_worker_rejects_oversized_upload` | **FIXED AND VERIFIED** |
@@ -64,7 +64,7 @@ All security controls operate under fail-closed principles, preserve existing ar
 ### S-01: Elimination of Unauthenticated Session Issuance
 - **File**: `backend/main.py`
 - **Mechanism**:
-  - Removed the block in `add_security_and_session_headers` that called `response.set_cookie("agriscan_session", ...)` on loopback requests for static files.
+  - Removed the block in `add_security_and_session_headers` that called `response.set_cookie("agrivisio_session", ...)` on loopback requests for static files.
   - Now, visiting `/`, `/index.html`, `/app.js`, or `/style.css` never sets an authentication cookie.
   - In `exchange_bootstrap_secret`, the response body was changed from `{"status": "authenticated", "token": token}` to strictly `{"status": "authenticated"}`. The master token is never sent across HTTP responses.
   - Tests verify that an unauthenticated caller making a GET request to `/` receives static assets without any `Set-Cookie` header, and subsequent calls to `/api/batches` or `/files/...` fail with `HTTP 401 Unauthorized`.
@@ -133,8 +133,8 @@ All security controls operate under fail-closed principles, preserve existing ar
 - **.NET Runtime**: Microsoft .NET Framework v4.0.30319 (`csc.exe`)
 
 ### Installer Build Verification
-- **Output Executable**: `AgriScanSetup.exe` (3,611,136 bytes / ~3,526.5 KB)
-- **Embedded Payload**: `agriscan_payload.zip` (3,456,234 bytes / ~3.30 MB)
+- **Output Executable**: `AgriVisioSetup.exe` (3,611,136 bytes / ~3,526.5 KB)
+- **Embedded Payload**: `agrivisio_payload.zip` (3,456,234 bytes / ~3.30 MB)
 - **Payload SHA-256**: `D27EFCE32AF202472AA455781C53AB0EC8C8B7959913DB046399380BF5BF63B4`
 - **Compiler**: `C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe` (0 errors, 0 warnings)
 
@@ -149,7 +149,7 @@ python -m pytest tests/ -v
 ============================= test session starts =============================
 platform win32 -- Python 3.13.15, pytest-9.1.1, pluggy-1.7.0 -- python.exe
 cachedir: .pytest_cache
-rootdir: C:\Users\HARSH AGGARWAL\OneDrive\Desktop\agriscan
+rootdir: C:\Users\HARSH AGGARWAL\OneDrive\Desktop\agrivisio
 plugins: anyio-4.15.1
 collected 74 items
 

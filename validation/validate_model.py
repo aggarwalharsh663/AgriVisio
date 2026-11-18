@@ -1,4 +1,4 @@
-"""Reproducible evaluation and validation script for AgriScan grain classification model.
+"""Reproducible evaluation and validation script for AgriVisio grain classification model.
 
 Evaluates the trained model against simulated ground-truth scenes across standard
 lighting presets, producing class-level precision, recall, confusion matrices,
@@ -126,7 +126,7 @@ def run_model_validation(
     }
 
     print("\n" + "=" * 60)
-    print("AGRISCAN MODEL VALIDATION SUMMARY")
+    print("AGRIVISIO MODEL VALIDATION SUMMARY")
     print("=" * 60)
     print(f"Evaluated Scans:      {summary['total_scans']}")
     print(f"Recognized Classes:   {', '.join(summary['classes'])} (4 classes)")
@@ -146,7 +146,7 @@ def run_model_validation(
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="AgriScan Model Validation")
+    parser = argparse.ArgumentParser(description="AgriVisio Model Validation")
     parser.add_argument("--grains", type=int, default=50, help="Grains per scan")
     args = parser.parse_args()
     run_model_validation(n_grains=args.grains)

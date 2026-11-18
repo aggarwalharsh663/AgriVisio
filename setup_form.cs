@@ -37,9 +37,9 @@ namespace AgriVisioSetup
         private CheckBox chkLaunchNow;
         private TextBox txtInstallPath;
 
-        // Configurable expected SHA-256 checksum for agriscan_payload.zip
+        // Configurable expected SHA-256 checksum for agrivisio_payload.zip
         // If empty or null, integrity verification uses embedded manifest or validates stream readable
-        public static string ExpectedPayloadSha256 = "40556D3ACC8F75AE21890FCE3A8A813F004B0DFE43C95B35F4C3BD485E0B8A6F";
+        public static string ExpectedPayloadSha256 = "3262447CD0C881250848539B645711D3A30555C25EB39A76CE9E601E96B87E5A";
 
                 /// <summary>
         /// Constant-time comparison of two hex hash strings to prevent timing side-channels (S-03).
@@ -275,10 +275,10 @@ namespace AgriVisioSetup
         }
 
         /// <summary>
-        /// Gracefully requests any currently open AgriVisio or AgriScan application instances in target directory to close.
+        /// Gracefully requests any currently open AgriVisio application instances in target directory to close.
         /// Does not perform forceful process termination.
         /// </summary>
-        private void CloseExistingAgriScanProcesses(string targetDir)
+        private void CloseExistingAgriVisioProcesses(string targetDir)
         {
             try
             {
@@ -287,7 +287,6 @@ namespace AgriVisioSetup
                 // Gracefully request application processes to close their main window
                 var procs = new List<Process>();
                 procs.AddRange(Process.GetProcessesByName("AgriVisio"));
-                procs.AddRange(Process.GetProcessesByName("AgriScan"));
                 foreach (var p in procs)
                 {
                     try
@@ -332,7 +331,7 @@ namespace AgriVisioSetup
             string root = Path.GetPathRoot(targetDir);
             if (string.Equals(targetDir.TrimEnd('\\', '/'), root.TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase))
             {
-                MessageBox.Show("Cannot install directly to the root of drive " + root + ". Please choose a subfolder (e.g. " + Path.Combine(root, "AgriScan") + ").", "Invalid Installation Path", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show("Cannot install directly to the root of drive " + root + ". Please choose a subfolder (e.g. " + Path.Combine(root, "AgriVisio") + ").", "Invalid Installation Path", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
@@ -392,9 +391,9 @@ namespace AgriVisioSetup
                 {
                     this.Invoke((MethodInvoker)delegate
                     {
-                        lblStatus.Text = "Checking for existing AgriScan instances...";
+                        lblStatus.Text = "Checking for existing AgriVisio instances...";
                     });
-                    CloseExistingAgriScanProcesses(targetDir);
+                    CloseExistingAgriVisioProcesses(targetDir);
                     Thread.Sleep(300);
 
                     this.Invoke((MethodInvoker)delegate
@@ -414,11 +413,11 @@ namespace AgriVisioSetup
                     }
 
                     Assembly asm = Assembly.GetExecutingAssembly();
-                    using (Stream zipStream = asm.GetManifestResourceStream("agriscan_payload.zip"))
+                    using (Stream zipStream = asm.GetManifestResourceStream("agrivisio_payload.zip"))
                     {
                         if (zipStream == null)
                         {
-                            throw new FileNotFoundException("Embedded installation payload 'agriscan_payload.zip' not found in executable.");
+                            throw new FileNotFoundException("Embedded installation payload 'agrivisio_payload.zip' not found in executable.");
                         }
 
                         this.Invoke((MethodInvoker)delegate
@@ -601,7 +600,7 @@ namespace AgriVisioSetup
             shortcutWarning = null;
             try
             {
-                string exePath = File.Exists(Path.Combine(targetDir, "AgriVisio.exe")) ? Path.Combine(targetDir, "AgriVisio.exe") : Path.Combine(targetDir, "AgriScan.exe");
+                string exePath = Path.Combine(targetDir, "AgriVisio.exe");
                 string electronExe = Path.Combine(targetDir, "electron", "dist", "electron.exe");
                 string mainScript = Path.Combine(targetDir, "electron", "main.cjs");
                 string iconPath = File.Exists(Path.Combine(targetDir, "agrivisio_icon.ico")) ? Path.Combine(targetDir, "agrivisio_icon.ico") : Path.Combine(targetDir, "app_icon.ico");
@@ -672,13 +671,13 @@ namespace AgriVisioSetup
                     if (string.IsNullOrEmpty(parent) || !Directory.Exists(parent))
                         return false;
 
-                    string testSub = Path.Combine(parent, "agriscan_perm_probe_" + Guid.NewGuid().ToString("N"));
+                    string testSub = Path.Combine(parent, "agrivisio_perm_probe_" + Guid.NewGuid().ToString("N"));
                     Directory.CreateDirectory(testSub);
                     Directory.Delete(testSub);
                     return true;
                 }
 
-                string testFile = Path.Combine(targetDir, "agriscan_perm_probe_" + Guid.NewGuid().ToString("N") + ".tmp");
+                string testFile = Path.Combine(targetDir, "agrivisio_perm_probe_" + Guid.NewGuid().ToString("N") + ".tmp");
                 File.WriteAllText(testFile, "probe");
                 File.Delete(testFile);
                 return true;
@@ -713,7 +712,7 @@ namespace AgriVisioSetup
             {
                 string electronExe = Path.Combine(targetDir, "electron", "dist", "electron.exe");
                 string mainScript = Path.Combine(targetDir, "electron", "main.cjs");
-                string exePath = File.Exists(Path.Combine(targetDir, "AgriVisio.exe")) ? Path.Combine(targetDir, "AgriVisio.exe") : Path.Combine(targetDir, "AgriScan.exe");
+                string exePath = Path.Combine(targetDir, "AgriVisio.exe");
 
                 if (File.Exists(electronExe) && File.Exists(mainScript))
                 {

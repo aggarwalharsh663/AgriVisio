@@ -1,6 +1,6 @@
-"""Comprehensive automated security regression tests for AgriScan.
+"""Comprehensive automated security regression tests for AgriVisio.
 
-Verifies remediation of vulnerabilities identified in the AgriScan security audit:
+Verifies remediation of vulnerabilities identified in the AgriVisio security audit:
 - F-01: Path traversal protection
 - F-03: API token authentication, CORS restrictions, sensitive file blocking
 - F-04: Model integrity verification, anti-tampering, removal of silent fallback
@@ -32,23 +32,23 @@ from backend.grain_analysis import (
 @pytest.fixture
 def auth_client():
     """Test client configured with valid token authentication."""
-    old_disable = os.environ.pop("AGRISCAN_DISABLE_AUTH_FOR_TESTS", None)
+    old_disable = os.environ.pop("AGRIVISIO_DISABLE_AUTH_FOR_TESTS", None)
     token = backend_main.get_api_token()
     with TestClient(backend_main.app) as client:
-        client.headers.update({"X-AgriScan-Token": token})
+        client.headers.update({"X-AgriVisio-Token": token})
         yield client
     if old_disable is not None:
-        os.environ["AGRISCAN_DISABLE_AUTH_FOR_TESTS"] = old_disable
+        os.environ["AGRIVISIO_DISABLE_AUTH_FOR_TESTS"] = old_disable
 
 
 @pytest.fixture
 def unauth_client():
     """Test client without any authentication credentials."""
-    old_disable = os.environ.pop("AGRISCAN_DISABLE_AUTH_FOR_TESTS", None)
+    old_disable = os.environ.pop("AGRIVISIO_DISABLE_AUTH_FOR_TESTS", None)
     with TestClient(backend_main.app) as client:
         yield client
     if old_disable is not None:
-        os.environ["AGRISCAN_DISABLE_AUTH_FOR_TESTS"] = old_disable
+        os.environ["AGRIVISIO_DISABLE_AUTH_FOR_TESTS"] = old_disable
 
 
 # --- F-03: API Authentication & Data Protection ---
@@ -76,7 +76,7 @@ def test_unauthenticated_requests_fail(unauth_client):
 
 
 def test_authenticated_requests_succeed(auth_client):
-    """Authenticated requests with valid X-AgriScan-Token must succeed."""
+    """Authenticated requests with valid X-AgriVisio-Token must succeed."""
     res = auth_client.get("/api/batches")
     assert res.status_code == 200
 
@@ -98,7 +98,7 @@ def test_cors_does_not_permit_arbitrary_origins():
 
 def test_sensitive_files_blocked_from_static_serving(auth_client):
     """Database, token, and python code files must be blocked with HTTP 403."""
-    for target in ["agriscan.sqlite3", ".auth_token", "model.joblib"]:
+    for target in ["agrivisio.sqlite3", ".auth_token", "model.joblib"]:
         res = auth_client.get(f"/files/{target}")
         assert res.status_code in (403, 404), f"Sensitive file {target} should be blocked, got {res.status_code}"
 
@@ -257,7 +257,7 @@ def test_export_filename_sanitization(auth_client):
             res = auth_client.get("/api/batches/AS-TEST-EXPORT/export")
             assert res.status_code == 200
             cd = res.headers.get("content-disposition", "")
-            assert 'filename="AgriVisio-Report-AS-TEST-EXPORT.json"' in cd or 'filename="AgriScan-Report-AS-TEST-EXPORT.json"' in cd
+            assert 'filename="AgriVisio-Report-AS-TEST-EXPORT.json"' in cd or 'filename="AgriVisio-Report-AS-TEST-EXPORT.json"' in cd
         finally:
             backend_main.DATA_DIR = old_data_dir
 
@@ -330,7 +330,7 @@ def test_files_authenticated_arbitrary_file_returns_404(auth_client):
 def test_files_traversal_attempts_rejected(auth_client):
     """Path traversal attempts under /files must be rejected with 403 or 404 (R-01)."""
     targets = [
-        "/files/batches/AS-001/..%2f..%2fagriscan.sqlite3",
+        "/files/batches/AS-001/..%2f..%2fagrivisio.sqlite3",
         "/files/batches/..%2f..%2fbackend%2fmain.py/test.jpg",
         r"/files/batches/AS-001/..\..\backend\main.py",
         "/files/batches/AS-001/test.sqlite3",
@@ -361,7 +361,7 @@ def test_bootstrap_secret_exchange_and_anti_replay(unauth_client):
     assert "token" not in data
 
     # Verify session cookie was set with HttpOnly
-    cookie = res.cookies.get("agriscan_session")
+    cookie = res.cookies.get("agrivisio_session")
     assert cookie is not None
     # Check Set-Cookie header attributes
     set_cookie_header = res.headers.get("set-cookie", "")
@@ -400,7 +400,7 @@ def test_logout_clears_cookie(auth_client):
     assert res.status_code == 200
     assert res.json().get("status") == "logged_out"
     set_cookie = res.headers.get("set-cookie", "").lower()
-    assert "agriscan_session=""" in set_cookie or "max-age=0" in set_cookie
+    assert "agrivisio_session=""" in set_cookie or "max-age=0" in set_cookie
 
 
 # --- R-03: Remove Internal Exception Leakage ---
@@ -408,7 +408,7 @@ def test_logout_clears_cookie(auth_client):
 def test_scan_error_returns_generic_500_without_path_leakage(auth_client, monkeypatch):
     """Scan failures must return generic user-facing message without leaking internal paths (R-03)."""
     def mock_fail(*args, **kwargs):
-        raise RuntimeError(r"Internal database error at C:\Users\Private\agriscan\core.py line 123")
+        raise RuntimeError(r"Internal database error at C:\Users\Private\agrivisio\core.py line 123")
 
     monkeypatch.setattr(backend_main, "_make_real_batch", mock_fail)
     res = auth_client.post(
@@ -471,10 +471,10 @@ def test_electron_csp_enforcement_and_graceful_shutdown():
 # --- R-07: Mock Mode Off By Default ---
 
 def test_mock_mode_strictly_disabled_by_default(auth_client, monkeypatch):
-    """Mock mode must be OFF by default and rejected without explicit AGRISCAN_ENV=development (R-07)."""
+    """Mock mode must be OFF by default and rejected without explicit AGRIVISIO_ENV=development (R-07)."""
     # 1. Default environment: mock mode rejected even if MOCK=1
     monkeypatch.setenv("MOCK", "1")
-    monkeypatch.delenv("AGRISCAN_ENV", raising=False)
+    monkeypatch.delenv("AGRIVISIO_ENV", raising=False)
     res = auth_client.post(
         "/api/scan",
         json={"lighting": "ring_light", "n_grains": 10, "seed": 42, "sample_name": "Test", "variety": "IR64"},
@@ -483,7 +483,7 @@ def test_mock_mode_strictly_disabled_by_default(auth_client, monkeypatch):
     assert "requires explicit development environment" in res.json().get("detail", "")
 
     # 2. Production environment: mock mode strictly prohibited
-    monkeypatch.setenv("AGRISCAN_ENV", "production")
+    monkeypatch.setenv("AGRIVISIO_ENV", "production")
     monkeypatch.setenv("MOCK", "1")
     res_prod = auth_client.post(
         "/api/scan",
@@ -493,7 +493,7 @@ def test_mock_mode_strictly_disabled_by_default(auth_client, monkeypatch):
     assert "strictly prohibited in production" in res_prod.json().get("detail", "")
 
     # 3. Explicit development environment + MOCK=1: mock mode works
-    monkeypatch.setenv("AGRISCAN_ENV", "development")
+    monkeypatch.setenv("AGRIVISIO_ENV", "development")
     monkeypatch.setenv("MOCK", "1")
     res_dev = auth_client.post(
         "/api/scan",
@@ -508,7 +508,7 @@ def test_mock_mode_strictly_disabled_by_default(auth_client, monkeypatch):
 
 def test_auth_bypass_env_var_strictly_ignored(unauth_client, monkeypatch):
     """Ensure no environment variable backdoors can disable authentication."""
-    monkeypatch.setenv("AGRISCAN_DISABLE_AUTH_FOR_TESTS", "1")
+    monkeypatch.setenv("AGRIVISIO_DISABLE_AUTH_FOR_TESTS", "1")
     res = unauth_client.post(
         "/api/scan",
         json={"lighting": "ring_light", "n_grains": 10, "seed": 42, "sample_name": "Test", "variety": "IR64"},
@@ -544,7 +544,7 @@ def test_ipc_worker_mock_mode_consistency(monkeypatch):
     from fastapi import HTTPException
 
     # Production with MOCK=1 must raise HTTPException(403)
-    monkeypatch.setenv("AGRISCAN_ENV", "production")
+    monkeypatch.setenv("AGRIVISIO_ENV", "production")
     monkeypatch.setenv("MOCK", "1")
     with pytest.raises(HTTPException) as excinfo:
         handle_scan({"lighting": "ring_light", "n_grains": 10, "seed": 42, "sample_name": "Test", "variety": "IR64"})
@@ -558,8 +558,8 @@ def test_s01_static_requests_never_issue_session_cookie(unauth_client):
     for endpoint in ["/", "/index.html", "/app.js", "/style.css"]:
         res = unauth_client.get(endpoint)
         set_cookie = res.headers.get("set-cookie", "")
-        assert "agriscan_session" not in set_cookie, f"Endpoint {endpoint} illegally issued agriscan_session cookie!"
-        assert "agriscan_session" not in res.cookies, f"Endpoint {endpoint} set agriscan_session in client cookies!"
+        assert "agrivisio_session" not in set_cookie, f"Endpoint {endpoint} illegally issued agrivisio_session cookie!"
+        assert "agrivisio_session" not in res.cookies, f"Endpoint {endpoint} set agrivisio_session in client cookies!"
 
 
 def test_s01_cookie_only_auth_fails_without_prior_bootstrap(unauth_client):
@@ -577,7 +577,7 @@ def test_s01_bootstrap_session_allows_api_access_without_leaking_token(unauth_cl
     assert res_boot.json() == {"status": "authenticated"}
     assert "token" not in res_boot.json()
 
-    # Now the client has the agriscan_session cookie; protected access must succeed
+    # Now the client has the agrivisio_session cookie; protected access must succeed
     res_batches = unauth_client.get("/api/batches")
     assert res_batches.status_code == 200
 
@@ -667,7 +667,7 @@ def test_t01_startup_bootstrap_secret_and_console_banner(capsys):
     assert secret and isinstance(secret, str)
     assert len(secret) >= 32
     captured = capsys.readouterr()
-    assert "AGRISCAN BROWSER AUTHENTICATION (T-01)" in captured.out
+    assert "AGRIVISIO BROWSER AUTHENTICATION (T-01)" in captured.out
     assert secret in captured.out
     assert f"?bootstrap={secret}" in captured.out
 
@@ -723,7 +723,7 @@ def test_t01_auth_status_endpoint(unauth_client, auth_client):
 
     # Authenticated caller with session cookie
     token = backend_main.get_or_create_api_token()
-    cookie_client = TestClient(backend_main.app, cookies={"agriscan_session": token})
+    cookie_client = TestClient(backend_main.app, cookies={"agrivisio_session": token})
     res_cookie = cookie_client.get("/api/auth/status")
     assert res_cookie.status_code == 200
     assert res_cookie.json() == {"authenticated": True}
@@ -734,12 +734,12 @@ def test_t01_browser_bootstrap_login_flow(unauth_client):
     # 1. Unauthenticated GET / and /login.html never issue session cookies (S-01 preserved)
     res_root = unauth_client.get("/")
     assert res_root.status_code == 200
-    assert "agriscan_session" not in res_root.cookies
-    assert "agriscan_session" not in res_root.headers.get("set-cookie", "")
+    assert "agrivisio_session" not in res_root.cookies
+    assert "agrivisio_session" not in res_root.headers.get("set-cookie", "")
 
     res_login_page = unauth_client.get("/login.html")
     assert res_login_page.status_code == 200
-    assert "agriscan_session" not in res_login_page.cookies
+    assert "agrivisio_session" not in res_login_page.cookies
 
     # 2. Status is unauthenticated
     assert unauth_client.get("/api/auth/status").json() == {"authenticated": False}
@@ -749,7 +749,7 @@ def test_t01_browser_bootstrap_login_flow(unauth_client):
     res_boot = unauth_client.post("/api/auth/bootstrap", json={"bootstrap_secret": secret})
     assert res_boot.status_code == 200
     assert res_boot.json() == {"status": "authenticated"}
-    assert "agriscan_session" in unauth_client.cookies
+    assert "agrivisio_session" in unauth_client.cookies
 
     # 4. Status is now authenticated
     assert unauth_client.get("/api/auth/status").json() == {"authenticated": True}
@@ -851,7 +851,7 @@ def test_s06_cors_wildcard_strictly_rejected_with_logging(caplog):
     """parse_and_validate_allowed_origins must outright reject wildcard '*' with loud error logging (S-06)."""
     import logging
 
-    with caplog.at_level(logging.ERROR, logger="agriscan"):
+    with caplog.at_level(logging.ERROR, logger="agrivisio"):
         origins = backend_main.parse_and_validate_allowed_origins("*, https://evil.com/*, *evil.com")
         assert "*" not in origins
         assert "https://evil.com/*" not in origins
@@ -865,7 +865,7 @@ def test_s06_cors_filters_empty_and_duplicate_origins(caplog):
     import logging
 
     raw = "http://localhost:8000, , https://farm.local, http://localhost:8000, https://farm.local, "
-    with caplog.at_level(logging.INFO, logger="agriscan"):
+    with caplog.at_level(logging.INFO, logger="agrivisio"):
         origins = backend_main.parse_and_validate_allowed_origins(raw)
         # Empty string not present
         assert "" not in origins
@@ -879,7 +879,7 @@ def test_s06_cors_rejects_schemeless_origins_with_logging(caplog):
     """parse_and_validate_allowed_origins must reject schemeless origins with loud logging (S-06)."""
     import logging
 
-    with caplog.at_level(logging.ERROR, logger="agriscan"):
+    with caplog.at_level(logging.ERROR, logger="agrivisio"):
         origins = backend_main.parse_and_validate_allowed_origins("attacker.com, evil.org")
         assert "attacker.com" not in origins
         assert "evil.org" not in origins
@@ -894,7 +894,7 @@ def test_s07_token_file_permissions_enforced_on_write(tmp_path, monkeypatch):
     fake_token_file = fake_data / ".auth_token"
     monkeypatch.setattr(backend_main, "DATA_DIR", fake_data)
     monkeypatch.setattr(backend_main, "AUTH_TOKEN_FILE", fake_token_file)
-    monkeypatch.delenv("AGRISCAN_API_TOKEN", raising=False)
+    monkeypatch.delenv("AGRIVISIO_API_TOKEN", raising=False)
 
     chmod_calls = []
     real_chmod = os.chmod
@@ -924,7 +924,7 @@ def test_s07_token_file_permissions_repaired_on_read(tmp_path, monkeypatch):
 
     monkeypatch.setattr(backend_main, "DATA_DIR", fake_data)
     monkeypatch.setattr(backend_main, "AUTH_TOKEN_FILE", fake_token_file)
-    monkeypatch.delenv("AGRISCAN_API_TOKEN", raising=False)
+    monkeypatch.delenv("AGRIVISIO_API_TOKEN", raising=False)
 
     chmod_calls = []
     real_chmod = os.chmod

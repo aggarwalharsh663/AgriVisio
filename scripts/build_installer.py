@@ -1,8 +1,8 @@
-"""AgriScan Windows Installer Build Script (R-05).
+"""AgriVisio Windows Installer Build Script (R-05).
 
 Packages application components into an embedded payload ZIP, computes its
 cryptographic SHA-256 checksum, embeds the hash into setup_form.cs, and
-compiles the fail-closed AgriScanSetup.exe installer with csc.exe.
+compiles the fail-closed AgriVisioSetup.exe installer with csc.exe.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ EXCLUDE_PATTERNS = [
     "__pycache__",
     ".pytest_cache",
     ".git",
-    "agriscan.sqlite3",
+    "agrivisio.sqlite3",
     "electron.log",
 ]
 
@@ -93,11 +93,10 @@ def build_installer(output_exe: Path | None = None) -> Path:
     if not CSC_EXE.is_file():
         raise FileNotFoundError(f"Missing C# compiler at {CSC_EXE}")
 
-    # Compile AgriVisio.exe and AgriScan.exe launcher with manifest and PE metadata
+    # Compile AgriVisio.exe launcher with manifest and PE metadata
     launcher_cs = ROOT_DIR / "launcher.cs"
     launcher_manifest = ROOT_DIR / "launcher.manifest"
     launcher_exe_visio = ROOT_DIR / "AgriVisio.exe"
-    launcher_exe_scan = ROOT_DIR / "AgriScan.exe"
     if launcher_cs.is_file() and launcher_manifest.is_file():
         launcher_cmd = [
             str(CSC_EXE),
@@ -110,18 +109,15 @@ def build_installer(output_exe: Path | None = None) -> Path:
         res_l = subprocess.run(launcher_cmd, capture_output=True, text=True)
         if res_l.returncode != 0:
             print("Warning: Launcher compilation failed:", res_l.stderr)
-        else:
-            import shutil
-            shutil.copy2(launcher_exe_visio, launcher_exe_scan)
 
     print("--- [1/4] Building installation payload ZIP ---")
-    tmp_payload = ROOT_DIR / "agriscan_payload.zip"
+    tmp_payload = ROOT_DIR / "agrivisio_payload.zip"
 
     try:
         with zipfile.ZipFile(tmp_payload, "w", zipfile.ZIP_DEFLATED) as zf:
             for fname in [
-                "AgriVisio.bat", "AgriScan.bat",
-                "AgriVisio.exe", "AgriScan.exe",
+                "AgriVisio.bat",
+                "AgriVisio.exe",
                 "app_icon.ico", "agrivisio_icon.ico", "LICENSE", "README.md", "requirements.txt",
             ]:
                 fpath = ROOT_DIR / fname
@@ -166,7 +162,7 @@ def build_installer(output_exe: Path | None = None) -> Path:
             f"/win32manifest:{installer_manifest}",
             "/reference:System.IO.Compression.dll",
             "/reference:System.IO.Compression.FileSystem.dll",
-            f"/resource:{tmp_payload},agriscan_payload.zip",
+            f"/resource:{tmp_payload},agrivisio_payload.zip",
             f"/resource:{ROOT_DIR / 'frontend' / 'assets' / 'emblem.png'},app_emblem.png",
             str(setup_cs),
         ]
@@ -179,10 +175,6 @@ def build_installer(output_exe: Path | None = None) -> Path:
 
         print(f"Successfully compiled {out_target} ({out_target.stat().st_size / 1024:.1f} KB)")
         print(f"Embedded payload SHA-256: {payload_sha256}")
-
-        if out_target.name == "AgriVisioSetup.exe":
-            import shutil
-            shutil.copy2(out_target, ROOT_DIR / "AgriScanSetup.exe")
 
         return out_target
     finally:

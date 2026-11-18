@@ -989,7 +989,7 @@
 	});
 
 	function initTheme() {
-		const saved = localStorage.getItem("agrivisio_theme") || localStorage.getItem("agriscan_theme") || "light";
+		const saved = localStorage.getItem("agrivisio_theme") || "light";
 		applyTheme(saved);
 		const toggleBtn = document.querySelector("#theme-toggle");
 		if (toggleBtn) {
@@ -997,7 +997,6 @@
 				const current = document.documentElement.classList.contains("dark") ? "dark" : "light";
 				const next = current === "dark" ? "light" : "dark";
 				localStorage.setItem("agrivisio_theme", next);
-				localStorage.setItem("agriscan_theme", next);
 				applyTheme(next);
 				if (typeof renderReportCharts.create === "function") {
 					renderReportCharts.create();

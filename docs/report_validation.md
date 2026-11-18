@@ -1,15 +1,15 @@
-# AgriScan Model Validation & Accuracy Report
+# AgriVisio Model Validation & Accuracy Report
 
 ## Executive Summary
 
-This report establishes the empirical validation methodology and performance benchmarks for the AgriScan grain assessment platform. It reconciles agronomic defect categories, details performance across optical lighting presets, evaluates measurement errors, and formally distinguishes simulated chamber experiments from real-world photograph analysis.
+This report establishes the empirical validation methodology and performance benchmarks for the AgriVisio grain assessment platform. It reconciles agronomic defect categories, details performance across optical lighting presets, evaluates measurement errors, and formally distinguishes simulated chamber experiments from real-world photograph analysis.
 
 ---
 
 ## 1. Agronomic Quality Classification
 
 ### Reconciling Four Core Grain Classes
-AgriScan implements **four** distinct morphological and photometric grain quality classes:
+AgriVisio implements **four** distinct morphological and photometric grain quality classes:
 1. **Good (`good`)**: Intact, translucent whole rice grains meeting typical variety aspect-ratio and dimension thresholds.
 2. **Broken (`broken`)**: Fractured grains with length significantly below whole grain expectations ($< 75\%$ standard whole grain length).
 3. **Chalky (`chalky`)**: Grains exhibiting opaque, starchy white chalkiness exceeding $20\%$ of projected surface area.

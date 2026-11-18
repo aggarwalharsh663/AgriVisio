@@ -48,7 +48,7 @@ AgriVisio is an enterprise computer vision and machine learning platform enginee
 ## Project Structure
 
 ```
-agriscan/
+agrivisio/
 ├── backend/                  # FastAPI service and computer vision engine
 │   ├── calibration.py        # Color patch detection and matrix balancing
 │   ├── database.py           # SQLite persistence layer and batch schema
@@ -142,9 +142,9 @@ Or execute the automated batch launcher:
 AgriVisio implements a multi-tier authentication model:
 1. **Desktop IPC Mode**: Electron communicates directly with the Python computer vision worker over protected standard input/output pipes (`stdio`), eliminating local network listening ports.
 2. **Browser / Web API Mode**: Protected endpoints require authentication via:
-   - `X-AgriVisio-Token: <token>` (or `X-AgriScan-Token`) HTTP header, or
+   - `X-AgriVisio-Token: <token>` HTTP header, or
    - `Authorization: Bearer <token>` HTTP header, or
-   - `agrivisio_session` (or `agriscan_session`) cookie (`HttpOnly=True`, `SameSite=Lax`, `Path=/`).
+   - `agrivisio_session` cookie (`HttpOnly=True`, `SameSite=Lax`, `Path=/`).
    - *Query-token authentication (`?token=...`) is strictly rejected* to prevent token exposure in URLs, browser history, or logs.
 3. **One-Time Bootstrap Protocol**: Arbitrary localhost HTTP callers cannot retrieve master API tokens. When initializing sessions, clients exchange a single-use, 30-second ephemeral bootstrap secret via `POST /api/auth/bootstrap`.
 
@@ -152,7 +152,7 @@ AgriVisio implements a multi-tier authentication model:
 Batch inspection records, report JSONs, and high-resolution photographs are served through authenticated, narrowly scoped endpoints (`/files/batches/{batch_id}/{filename}`). Unauthenticated requests return HTTP 401. Directory traversal (`..`), percent-encoded traversals (`%2e`), null bytes (`%00`), and sensitive system files (`.sqlite3`, `.db`, `.auth_token`, `.py`, `.joblib`, `.env`) are strictly blocked.
 
 ### Content Security Policy (CSP)
-Electron enforces a strict CSP on `app://agriscan`:
+Electron enforces a strict CSP on `app://agrivisio`:
 ```
 default-src 'self' app:; script-src 'self' app:; style-src 'self' 'unsafe-inline' app: https://fonts.googleapis.com; font-src 'self' app: https://fonts.gstatic.com data:; img-src 'self' app: data: blob:; connect-src 'self' app: http://127.0.0.1:* http://localhost:*; object-src 'none'; base-uri 'self' app:; frame-ancestors 'none';
 ```
@@ -162,22 +162,22 @@ default-src 'self' app:; script-src 'self' app:; style-src 'self' 'unsafe-inline
 Mock simulation mode is **strictly OFF by default** to prevent confusion with genuine laboratory measurements.
 To intentionally enable mock simulation for testing, developers must explicitly set **both**:
 ```powershell
-$env:AGRISCAN_ENV = "development"
+$env:AGRIVISIO_ENV = "development"
 $env:MOCK = "1"
 ```
-If `AGRISCAN_ENV=production`, mock mode is unconditionally rejected with HTTP 403 Forbidden. Mock batches are watermarked and cannot be exported as official certificates.
+If `AGRIVISIO_ENV=production`, mock mode is unconditionally rejected with HTTP 403 Forbidden. Mock batches are watermarked and cannot be exported as official certificates.
 
 ---
 
 ## Building the Windows Installer
 
-AgriScan includes an automated build script that packages runtime components into an embedded payload ZIP, computes its cryptographic SHA-256 hash, stamps the hash into `setup_form.cs`, and compiles `AgriScanSetup.exe` with `csc.exe`:
+AgriVisio includes an automated build script that packages runtime components into an embedded payload ZIP, computes its cryptographic SHA-256 hash, stamps the hash into `setup_form.cs`, and compiles `AgriVisioSetup.exe` with `csc.exe`:
 
 ```powershell
 python scripts/build_installer.py
 ```
 
-The resulting `AgriScanSetup.exe` verifies the embedded payload against the stamped SHA-256 before extraction and fails closed if any byte has been modified or corrupted.
+The resulting `AgriVisioSetup.exe` verifies the embedded payload against the stamped SHA-256 before extraction and fails closed if any byte has been modified or corrupted.
 
 ---
 

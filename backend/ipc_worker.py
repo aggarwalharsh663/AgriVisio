@@ -30,7 +30,7 @@ from backend.main import (
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-LOGGER = logging.getLogger("agriscan_ipc_worker")
+LOGGER = logging.getLogger("agrivisio_ipc_worker")
 
 
 def handle_health(data: dict) -> dict:
@@ -87,7 +87,7 @@ def _try_scan_wia():
 
     # Use PowerShell + WIA COM to scan securely with parameterized output path
     scan_id = uuid.uuid4().hex
-    temp_path = os.path.abspath(os.path.join(tempfile.gettempdir(), f"agriscan_hw_{scan_id}.jpg"))
+    temp_path = os.path.abspath(os.path.join(tempfile.gettempdir(), f"agrivisio_hw_{scan_id}.jpg"))
 
     ps_script = '''
 param([string]$outputPath)
@@ -230,7 +230,7 @@ def main():
         LOGGER.warning("Could not pre-load classifier model: %s", exc)
 
     # Signal portless readiness to Electron parent process
-    print(json.dumps({"event": "ready", "app": "agriscan"}), flush=True)
+    print(json.dumps({"event": "ready", "app": "agrivisio"}), flush=True)
 
     for line in sys.stdin:
         line = line.strip()
