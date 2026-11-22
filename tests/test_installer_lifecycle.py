@@ -281,14 +281,14 @@ def test_installer_scenario_extraction_fails_permanently_locked_file(tmp_path):
 
 def test_installer_scenario_reinstallation_over_existing_version(tmp_path):
     """Scenario 9: Reinstalling over an existing version preserves user database and updates binaries."""
-    from scripts.build_installer import EXCLUDE_PATTERNS, build_payload_zip
+    from scripts.build_installer import EXCLUDE_PATTERNS, ROOT_DIR, build_payload_zip
     assert "agrivisio.sqlite3" in EXCLUDE_PATTERNS
 
     target_dir = tmp_path / "ExistingInstall"
     target_dir.mkdir()
 
     # Pre-existing installation files
-    (target_dir / "AgriVisio.exe").write_text("V1.0 binary", encoding="utf-8")
+    (target_dir / "AgriVisio.bat").write_text("V1.0 script sentinel", encoding="utf-8")
     db_file = target_dir / "agrivisio.sqlite3"
     sentinel = "PRE-EXISTING USER DATABASE SENTINEL"
     db_file.write_text(sentinel, encoding="utf-8")
@@ -300,11 +300,16 @@ def test_installer_scenario_reinstallation_over_existing_version(tmp_path):
     with zipfile.ZipFile(fresh_payload, "r") as zf:
         assert "agrivisio.sqlite3" not in zf.namelist()
         assert not any(n.endswith("agrivisio.sqlite3") for n in zf.namelist())
+        assert "AgriVisio.bat" in zf.namelist()
         zf.extractall(target_dir)
 
-    # Verify binary was extracted/updated from payload
-    assert (target_dir / "AgriVisio.exe").is_file()
-    assert (target_dir / "AgriVisio.exe").read_bytes() != b"V1.0 binary"
+    # Verify tracked launcher script was extracted/updated from payload
+    assert (target_dir / "AgriVisio.bat").is_file()
+    assert (target_dir / "AgriVisio.bat").read_text(encoding="utf-8") != "V1.0 script sentinel"
+
+    # If launcher binary was compiled, verify it was extracted and updated
+    if (ROOT_DIR / "AgriVisio.exe").is_file():
+        assert (target_dir / "AgriVisio.exe").is_file()
 
     # Verify user database preserved untouched
     assert db_file.read_text(encoding="utf-8") == sentinel
