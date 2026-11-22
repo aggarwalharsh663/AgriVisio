@@ -30,6 +30,16 @@ from backend.grain_analysis import (
     _load_model,
     analyze_image,
     analyze_uploaded_image,
+    compute_batch_summary,
+)
+from backend.hardware_scanner import (
+    HardwareScanUnsupportedError,
+    ScannerNotFoundError,
+    ScannerOperationError,
+    ScannerTimeoutError,
+    acquire_hardware_scan,
+    is_hardware_scan_supported,
+    resolve_scanner_calibration,
 )
 from backend.simulator import make_scene
 from validation.validate import compare
@@ -47,8 +57,16 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 _batch_lock = threading.RLock()
 LABELS = ["good", "broken", "chalky", "discolored"]
-UPLOAD_MAX_BYTES = 10 * 1024 * 1024       # 10 MB limit
-UPLOAD_MAX_PIXELS = 20_000_000            # 20 Megapixel limit
+from backend.image_security import (
+    CorruptImageError,
+    DecompressionBombError,
+    OversizedFileError,
+    UnsupportedFormatError,
+    UPLOAD_CONCURRENCY_SEMAPHORE,
+    UPLOAD_MAX_BYTES,
+    UPLOAD_MAX_PIXELS,
+    validate_image_header,
+)
 ESTIMATED_MM_PER_PIXEL = 0.12
 
 
@@ -59,8 +77,19 @@ BOOTSTRAP_SECRET_TTL = float(os.getenv("AGRIVISIO_BOOTSTRAP_TTL", "300.0"))  # D
 _last_console_printed_secret: str | None = None
 
 
+def is_ipc_worker_mode() -> bool:
+    """Check if currently running inside the portless desktop IPC worker process."""
+    return os.getenv("AGRIVISIO_IPC_MODE") == "1" or bool(os.getenv("AGRIVISIO_PARENT_PID"))
+
+
 def print_bootstrap_banner(secret: str, ttl: float = BOOTSTRAP_SECRET_TTL, reason: str = "") -> None:
-    """Print the single-use bootstrap secret and direct URL to the server console (T-01)."""
+    """Print the single-use bootstrap secret and direct URL to the server console (T-01).
+
+    In IPC worker mode, stdout is strictly reserved for JSON-lines IPC protocol to prevent
+    protocol errors and token leaks into electron.log.
+    """
+    if is_ipc_worker_mode():
+        return
     host = os.getenv("AGRIVISIO_HOST", "127.0.0.1")
     port = os.getenv("AGRIVISIO_PORT", "8000")
     url = f"http://{host}:{port}/?bootstrap={secret}"
@@ -289,6 +318,14 @@ class ScanRequest(BaseModel):
     variety: str = Field(min_length=1, max_length=80)
 
 
+class ScanHardwareRequest(BaseModel):
+    lighting: str = Field(default="ring_light", pattern="^(ring_light|daylight|tube_light)$")
+    sample_name: str = Field(min_length=1, max_length=80)
+    variety: str = Field(min_length=1, max_length=80)
+    calibration_mm_per_pixel: float | None = Field(default=None, gt=0)
+    dpi: int | float | None = Field(default=None, gt=0)
+
+
 def _next_batch_id() -> str:
     """Defensively generate next batch ID, handling non-integer folders safely."""
     date_part = datetime.now().strftime("%Y%m%d")
@@ -449,17 +486,12 @@ def _make_mock_batch(request: ScanRequest) -> dict:
     }
     base_url = f"/files/batches/{batch_id}"
 
-    summary = {
-        "total_grains": total,
-        "counts": counts,
-        "percent": percent,
-        "mean_length_mm": round(mean(lengths), 2) if lengths else 0,
-        "std_length_mm": round(pstdev(lengths), 2) if len(lengths) > 1 else 0,
-        "mean_width_mm": round(mean(widths), 2) if widths else 0,
-        "mean_lb_ratio": round(mean(g["lb_ratio"] for g in grains), 2) if grains else 0,
-        "mean_confidence": round(mean_confidence, 3),
-        "low_confidence_count": low_confidence_count,
-    }
+    summary = compute_batch_summary(
+        grains,
+        counts=counts,
+        percent=percent,
+        total=total,
+    )
 
     calibration_meta = {
         "calibration_status": "SIMULATED",
@@ -506,8 +538,18 @@ def _make_mock_batch(request: ScanRequest) -> dict:
             "note": "MOCK DATA — NOT A REAL MEASUREMENT",
         },
     }
-    (batch_dir / "batch.json").write_text(json.dumps(batch, indent=2), encoding="utf-8")
-    save_batch(batch, DATABASE_PATH)
+    try:
+        save_batch(batch, DATABASE_PATH)
+    except Exception:
+        import shutil
+        shutil.rmtree(batch_dir, ignore_errors=True)
+        raise
+
+    try:
+        (batch_dir / "batch.json").write_text(json.dumps(batch, indent=2), encoding="utf-8")
+    except Exception as write_err:
+        LOGGER.warning("Could not write recovery batch.json for %s: %s", batch_id, write_err)
+
     return batch
 
 
@@ -555,17 +597,12 @@ def _make_real_batch(request: ScanRequest) -> dict:
         "annotated": f"{base_url}/annotated.jpg",
     }
 
-    summary = {
-        "total_grains": total,
-        "counts": counts,
-        "percent": percent,
-        "mean_length_mm": round(mean(lengths), 2) if lengths else 0,
-        "std_length_mm": round(pstdev(lengths), 2) if len(lengths) > 1 else 0,
-        "mean_width_mm": round(mean(widths), 2) if widths else 0,
-        "mean_lb_ratio": round(mean(grain["lb_ratio"] for grain in grains), 2) if grains else 0,
-        "mean_confidence": round(mean(grain["confidence"] for grain in grains), 3) if grains else 0,
-        "low_confidence_count": sum(grain["low_confidence"] for grain in grains),
-    }
+    summary = compute_batch_summary(
+        grains,
+        counts=counts,
+        percent=percent,
+        total=total,
+    )
 
     calibration_meta = {
         "calibration_status": "CHAMBER_CALIBRATED",
@@ -600,8 +637,18 @@ def _make_real_batch(request: ScanRequest) -> dict:
         "fingerprint": fingerprint,
         "validation": validation,
     }
-    (batch_dir / "batch.json").write_text(json.dumps(batch, indent=2), encoding="utf-8")
-    save_batch(batch, DATABASE_PATH)
+    try:
+        save_batch(batch, DATABASE_PATH)
+    except Exception:
+        import shutil
+        shutil.rmtree(batch_dir, ignore_errors=True)
+        raise
+
+    try:
+        (batch_dir / "batch.json").write_text(json.dumps(batch, indent=2), encoding="utf-8")
+    except Exception as write_err:
+        LOGGER.warning("Could not write recovery batch.json for %s: %s", batch_id, write_err)
+
     return batch
 
 
@@ -611,134 +658,228 @@ def _make_uploaded_batch(
     variety: str,
     lighting: str,
     raw_bytes: bytes | None = None,
-    calibration_mm_per_pixel: float | None = None,
+    calibration_mm_per_pixel: float | tuple[float, float] | None = None,
     reference_length_mm: float | None = None,
     reference_pixels: float | None = None,
+    calibration_status: str | None = None,
+    reference_type: str | None = None,
+    scanner_dpi: int | float | tuple[float, float] | None = None,
+    source_type: str = "UPLOADED_IMAGE",
 ) -> dict:
     """Analyze an uploaded photo using physical calibration workflow (F-06)."""
+    # Validate effective calibration before creating batch directory or writing files (CR Finding 24)
+    if calibration_mm_per_pixel is not None:
+        if isinstance(calibration_mm_per_pixel, (tuple, list)):
+            if len(calibration_mm_per_pixel) != 2:
+                raise ValueError("calibration_mm_per_pixel must contain exactly 2 positive finite numbers.")
+            for s in calibration_mm_per_pixel:
+                if not isinstance(s, (int, float)) or s <= 0 or not np.isfinite(s):
+                    raise ValueError("calibration_mm_per_pixel components must be positive finite numbers.")
+            pixel_area = float(calibration_mm_per_pixel[0]) * float(calibration_mm_per_pixel[1])
+        elif isinstance(calibration_mm_per_pixel, (int, float)):
+            s = float(calibration_mm_per_pixel)
+            if s <= 0 or not np.isfinite(s):
+                raise ValueError("calibration_mm_per_pixel must be a positive finite number.")
+            pixel_area = s * s
+        else:
+            raise ValueError(f"Invalid type for calibration_mm_per_pixel: {type(calibration_mm_per_pixel).__name__}")
+
+        if pixel_area <= 0 or not np.isfinite(pixel_area) or pixel_area < 1e-12:
+            raise ValueError("calibration_mm_per_pixel produces an unusable or non-finite pixel area resolution.")
+
+    if reference_length_mm is not None or reference_pixels is not None:
+        if reference_length_mm is None or reference_pixels is None:
+            raise ValueError("Both reference_length_mm and reference_pixels must be provided together.")
+        if reference_length_mm <= 0 or not np.isfinite(reference_length_mm):
+            raise ValueError("reference_length_mm must be a positive finite number.")
+        if reference_pixels <= 0 or not np.isfinite(reference_pixels):
+            raise ValueError("reference_pixels must be a positive finite number.")
+        ref_scale = reference_length_mm / reference_pixels
+        ref_area = ref_scale * ref_scale
+        if ref_area <= 0 or not np.isfinite(ref_area) or ref_area < 1e-12:
+            raise ValueError("Physical reference calibration produces an unusable or non-finite pixel area resolution.")
+
     batch_id, batch_dir = _create_batch_directory()
-    raw_path = batch_dir / "uploaded-photo.jpg"
-    calibrated_path = batch_dir / "calibrated.jpg"
-    if raw_bytes is not None:
-        raw_path.write_bytes(raw_bytes)
-        calibrated_path.write_bytes(raw_bytes)
-    else:
-        if not cv2.imwrite(str(raw_path), image) or not cv2.imwrite(str(calibrated_path), image):
-            raise OSError("The uploaded photo could not be saved.")
-
-    # Physical Calibration Workflow:
-    # Completely remove tray color and sample/variety name guessing
-    calibration_status = "UNCALIBRATED"
-    reference_type = "NONE"
-    ref_length = None
-
-    if reference_length_mm is not None and reference_pixels is not None:
-        if reference_length_mm <= 0 or reference_pixels <= 0:
-            raise ValueError("Reference dimensions must be greater than zero.")
-        scale_mm_per_pixel = float(reference_length_mm) / float(reference_pixels)
-        calibration_status = "CALIBRATED"
-        reference_type = "PHYSICAL_REFERENCE_OBJECT"
-        ref_length = float(reference_length_mm)
-        estimate_note = f"Calibrated with physical reference ({ref_length:.1f} mm): {scale_mm_per_pixel:.4f} mm/pixel. "
-    elif calibration_mm_per_pixel is not None:
-        if calibration_mm_per_pixel <= 0:
-            raise ValueError("calibration_mm_per_pixel must be greater than zero.")
-        scale_mm_per_pixel = float(calibration_mm_per_pixel)
-        calibration_status = "CALIBRATED"
-        reference_type = "DIRECT_SCALE_INPUT"
-        estimate_note = f"Calibrated scale: {scale_mm_per_pixel:.4f} mm/pixel. "
-    else:
-        scale_mm_per_pixel = ESTIMATED_MM_PER_PIXEL
-        calibration_status = "UNCALIBRATED"
-        reference_type = "DEFAULT_ESTIMATE"
-        estimate_note = "Estimated size; assumed scale 0.12 mm/pixel (not calibrated). "
-
-    analysis = analyze_uploaded_image(str(calibrated_path), scale_mm_per_pixel, str(batch_dir))
-    grains = analysis["grains"]
-    for grain in grains:
-        grain["reason"] = estimate_note + grain["reason"]
-
-    counts = {
-        label: sum(grain["label"] == label for grain in grains)
-        for label in LABELS
-    }
-    total = len(grains)
-    lengths = [grain["length_mm"] for grain in grains]
-    widths = [grain["width_mm"] for grain in grains]
-    percent = {
-        label: round(count / total * 100, 1) if total else 0
-        for label, count in counts.items()
-    }
-    base_url = f"/files/batches/{batch_id}"
-
-    summary = {
-        "total_grains": total,
-        "counts": counts,
-        "percent": percent,
-        "mean_length_mm": round(mean(lengths), 2) if lengths else 0,
-        "std_length_mm": round(pstdev(lengths), 2) if len(lengths) > 1 else 0,
-        "mean_width_mm": round(mean(widths), 2) if widths else 0,
-        "mean_lb_ratio": round(mean(grain["lb_ratio"] for grain in grains), 2) if grains else 0,
-        "mean_confidence": round(mean(grain["confidence"] for grain in grains), 3) if grains else 0,
-        "low_confidence_count": sum(grain["low_confidence"] for grain in grains),
-    }
-
-    calibration_meta = {
-        "calibration_status": calibration_status,
-        "mm_per_pixel": round(scale_mm_per_pixel, 5),
-        "calibration_reference_type": reference_type,
-        "calibration_reference_length_mm": ref_length,
-        "calibration_timestamp": datetime.now().astimezone().isoformat(timespec="seconds"),
-        "measurement_source": "UPLOADED_IMAGE",
-        "patch_error_before": None,
-        "patch_error_after": None,
-    }
-
-    fingerprint = compute_batch_fingerprint(
-        counts=counts,
-        summary=summary,
-        calibration=calibration_meta,
-        image_bytes=raw_bytes,
-        labels=LABELS,
-    )
-
-    batch = {
-        "batch_id": batch_id,
-        "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
-        "sample_name": sample_name.strip(),
-        "variety": variety.strip(),
-        "lighting": lighting,
-        "simulated": False,  # Uploaded real photographs are NOT simulated
-        "is_mock": False,
-        "measurement_status": "REAL_IMAGE_MEASUREMENT",
-        "images": {
-            "raw": f"{base_url}/uploaded-photo.jpg",
-            "calibrated": f"{base_url}/calibrated.jpg",
-            "annotated": f"{base_url}/annotated.jpg",
-        },
-        "calibration": calibration_meta,
-        "grains": grains,
-        "summary": summary,
-        "fingerprint": fingerprint,
-        "validation": {
-            "accuracy": None,
-            "per_class": {
-                label: {"precision": None, "recall": None}
-                for label in LABELS
-            },
-            "confusion_matrix": [[0 for _ in LABELS] for _ in LABELS],
-            "labels": LABELS,
-            "length_mae_mm": None,
-        },
-    }
-    # Write to standardized batch directory
-    (batch_dir / "batch.json").write_text(json.dumps(batch, indent=2), encoding="utf-8")
-    # Backward compatibility: write copy to DATA_DIR / batch_id
     legacy_dir = DATA_DIR / batch_id
-    legacy_dir.mkdir(parents=True, exist_ok=True)
-    (legacy_dir / "batch.json").write_text(json.dumps(batch, indent=2), encoding="utf-8")
+    try:
+        ext = ".jpg"
+        if raw_bytes:
+            if raw_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
+                ext = ".png"
+            elif len(raw_bytes) >= 12 and raw_bytes[:4] == b"RIFF" and raw_bytes[8:12] == b"WEBP":
+                ext = ".webp"
+        raw_filename = f"uploaded-photo{ext}"
+        calibrated_filename = f"calibrated{ext}"
+        raw_path = batch_dir / raw_filename
+        calibrated_path = batch_dir / calibrated_filename
+        if raw_bytes is not None:
+            raw_path.write_bytes(raw_bytes)
+            calibrated_path.write_bytes(raw_bytes)
+        else:
+            if not cv2.imwrite(str(raw_path), image) or not cv2.imwrite(str(calibrated_path), image):
+                raise OSError("The uploaded photo could not be saved.")
 
-    save_batch(batch, DATABASE_PATH)
+        # Physical Calibration Workflow:
+        # Completely remove tray color and sample/variety name guessing
+        status = "UNCALIBRATED"
+        ref_type = "NONE"
+        ref_length = None
+
+        if (reference_length_mm is not None and reference_pixels is None) or (
+            reference_length_mm is None and reference_pixels is not None
+        ):
+            raise ValueError(
+                "Both reference_length_mm and reference_pixels must be provided together for physical reference calibration."
+            )
+
+        if reference_length_mm is not None and reference_pixels is not None:
+            if reference_length_mm <= 0 or reference_pixels <= 0 or not np.isfinite(reference_length_mm) or not np.isfinite(reference_pixels):
+                raise ValueError("Reference dimensions must be greater than zero.")
+            scale_mm_per_pixel = float(reference_length_mm) / float(reference_pixels)
+            status = "CALIBRATED"
+            ref_type = "PHYSICAL_REFERENCE_OBJECT"
+            ref_length = float(reference_length_mm)
+            estimate_note = f"Calibrated with physical reference ({ref_length:.1f} mm): {scale_mm_per_pixel:.4f} mm/pixel. "
+        elif calibration_status is not None and reference_type is not None:
+            status = calibration_status
+            ref_type = reference_type
+            scale_mm_per_pixel = (
+                calibration_mm_per_pixel
+                if calibration_mm_per_pixel is not None
+                else ESTIMATED_MM_PER_PIXEL
+            )
+            if status == "CALIBRATED":
+                if ref_type == "FLATBED_SCANNER_300DPI":
+                    estimate_note = "Calibrated flatbed scanner at 300 DPI (0.08467 mm/pixel). "
+                else:
+                    scale_disp = (
+                        f"{scale_mm_per_pixel[0]:.4f}x{scale_mm_per_pixel[1]:.4f}"
+                        if isinstance(scale_mm_per_pixel, (tuple, list))
+                        else f"{scale_mm_per_pixel:.4f}"
+                    )
+                    estimate_note = f"Calibrated {ref_type}: {scale_disp} mm/pixel. "
+            else:
+                estimate_note = f"Unverified scanner resolution; assumed scale {ESTIMATED_MM_PER_PIXEL} mm/pixel (not calibrated). "
+        elif calibration_mm_per_pixel is not None:
+            if isinstance(calibration_mm_per_pixel, (tuple, list)):
+                if len(calibration_mm_per_pixel) != 2 or any(s <= 0 or not np.isfinite(s) for s in calibration_mm_per_pixel):
+                    raise ValueError("calibration_mm_per_pixel tuple/list must contain exactly 2 positive finite numbers.")
+                scale_mm_per_pixel = (float(calibration_mm_per_pixel[0]), float(calibration_mm_per_pixel[1]))
+                scale_disp = f"{scale_mm_per_pixel[0]:.4f}x{scale_mm_per_pixel[1]:.4f}"
+            else:
+                if calibration_mm_per_pixel <= 0 or not np.isfinite(calibration_mm_per_pixel):
+                    raise ValueError("calibration_mm_per_pixel must be greater than zero.")
+                scale_mm_per_pixel = float(calibration_mm_per_pixel)
+                scale_disp = f"{scale_mm_per_pixel:.4f}"
+            status = "CALIBRATED"
+            ref_type = "DIRECT_SCALE_INPUT"
+            estimate_note = f"Calibrated scale: {scale_disp} mm/pixel. "
+        else:
+            scale_mm_per_pixel = ESTIMATED_MM_PER_PIXEL
+            status = "UNCALIBRATED"
+            ref_type = "DEFAULT_ESTIMATE"
+            estimate_note = "Estimated size; assumed scale 0.12 mm/pixel (not calibrated). "
+
+        analysis = analyze_uploaded_image(str(calibrated_path), scale_mm_per_pixel, str(batch_dir))
+        grains = analysis["grains"]
+        for grain in grains:
+            grain["reason"] = estimate_note + grain["reason"]
+
+        counts = {
+            label: sum(grain["label"] == label for grain in grains)
+            for label in LABELS
+        }
+        total = len(grains)
+        lengths = [grain["length_mm"] for grain in grains]
+        widths = [grain["width_mm"] for grain in grains]
+        percent = {
+            label: round(count / total * 100, 1) if total else 0
+            for label, count in counts.items()
+        }
+        base_url = f"/files/batches/{batch_id}"
+
+        summary = compute_batch_summary(
+            grains,
+            counts=counts,
+            percent=percent,
+            total=total,
+        )
+
+        if isinstance(scale_mm_per_pixel, (tuple, list)):
+            meta_scale = float((scale_mm_per_pixel[0] + scale_mm_per_pixel[1]) / 2.0)
+        else:
+            meta_scale = float(scale_mm_per_pixel)
+
+        calibration_meta = {
+            "calibration_status": status,
+            "mm_per_pixel": meta_scale,
+            "calibration_reference_type": ref_type,
+            "calibration_reference_length_mm": ref_length,
+            "calibration_timestamp": datetime.now().astimezone().isoformat(timespec="seconds"),
+            "measurement_source": source_type,
+            "source_type": source_type,
+            "scanner_dpi": scanner_dpi,
+            "patch_error_before": None,
+            "patch_error_after": None,
+        }
+        if isinstance(scale_mm_per_pixel, (tuple, list)):
+            calibration_meta["mm_per_pixel_x"] = float(scale_mm_per_pixel[0])
+            calibration_meta["mm_per_pixel_y"] = float(scale_mm_per_pixel[1])
+
+        fingerprint = compute_batch_fingerprint(
+            counts=counts,
+            summary=summary,
+            calibration=calibration_meta,
+            image_bytes=raw_bytes,
+            labels=LABELS,
+        )
+
+        batch = {
+            "batch_id": batch_id,
+            "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+            "sample_name": sample_name.strip(),
+            "variety": variety.strip(),
+            "lighting": lighting,
+            "simulated": False,  # Uploaded real photographs are NOT simulated
+            "is_mock": False,
+            "measurement_status": "REAL_IMAGE_MEASUREMENT",
+            "images": {
+                "raw": f"{base_url}/{raw_filename}",
+                "calibrated": f"{base_url}/{calibrated_filename}",
+                "annotated": f"{base_url}/annotated.jpg",
+            },
+            "calibration": calibration_meta,
+            "grains": grains,
+            "summary": summary,
+            "fingerprint": fingerprint,
+            "validation": {
+                "accuracy": None,
+                "per_class": {
+                    label: {"precision": None, "recall": None}
+                    for label in LABELS
+                },
+                "confusion_matrix": [[0 for _ in LABELS] for _ in LABELS],
+                "labels": LABELS,
+                "length_mae_mm": None,
+            },
+        }
+        # Persist to database first; only make eligible for disk recovery after persistence succeeds
+        save_batch(batch, DATABASE_PATH)
+    except Exception:
+        import shutil
+        shutil.rmtree(batch_dir, ignore_errors=True)
+        shutil.rmtree(legacy_dir, ignore_errors=True)
+        raise
+
+    # Write to standardized batch directory only after database persistence succeeds
+    try:
+        (batch_dir / "batch.json").write_text(json.dumps(batch, indent=2), encoding="utf-8")
+        # Backward compatibility: write copy to DATA_DIR / batch_id
+        legacy_dir.mkdir(parents=True, exist_ok=True)
+        (legacy_dir / "batch.json").write_text(json.dumps(batch, indent=2), encoding="utf-8")
+    except Exception as write_err:
+        LOGGER.warning("Could not write recovery batch.json for %s: %s", batch_id, write_err)
+
     return batch
 
 
@@ -755,7 +896,18 @@ async def lifespan(app: FastAPI):
     # Validate custom CORS configuration at startup (S-06)
     raw_cors = os.getenv("AGRIVISIO_ALLOWED_ORIGINS")
     if raw_cors:
-        parse_and_validate_allowed_origins(raw_cors)
+        active_origins = parse_and_validate_allowed_origins(raw_cors)
+        for middleware in getattr(app, "user_middleware", []):
+            if getattr(middleware, "cls", None) == CORSMiddleware:
+                middleware.options["allow_origins"] = active_origins
+        current = getattr(app, "middleware_stack", None)
+        while current is not None:
+            if isinstance(current, CORSMiddleware):
+                current.allow_origins = active_origins
+                if hasattr(current, "compile_allow_origins"):
+                    current.compile_allow_origins(origins=active_origins)
+                break
+            current = getattr(current, "app", None)
 
     stop_event = asyncio.Event()
 
@@ -852,6 +1004,44 @@ app.add_middleware(
 
 
 @app.middleware("http")
+async def enforce_request_body_size_limit(request: Request, call_next):
+    """
+    Enforces upload byte limit before multipart body parsing and temporary disk spooling.
+    Deployment / Ingress Note: Reverse proxies (e.g. Nginx client_max_body_size 10M, Caddy, Cloudflare)
+    must also enforce a 10 MB request limit at the edge to protect network bandwidth before traffic reaches ASGI.
+    """
+    max_body_bytes = UPLOAD_MAX_BYTES + 65536
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            if int(content_length) > max_body_bytes:
+                return JSONResponse(
+                    status_code=413,
+                    content={"detail": "Photo must be 10 MB or smaller."},
+                )
+        except (ValueError, TypeError):
+            pass
+
+    if request.url.path in ("/api/batches/upload", "/api/scan", "/api/scan/upload"):
+        bytes_received = 0
+        original_receive = request.receive
+
+        async def limited_receive():
+            nonlocal bytes_received
+            message = await original_receive()
+            if message.get("type") == "http.request":
+                body = message.get("body", b"")
+                bytes_received += len(body)
+                if bytes_received > max_body_bytes:
+                    raise HTTPException(status_code=413, detail="Photo must be 10 MB or smaller.")
+            return message
+
+        request._receive = limited_receive
+
+    return await call_next(request)
+
+
+@app.middleware("http")
 async def add_security_and_session_headers(request: Request, call_next):
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
@@ -859,6 +1049,32 @@ async def add_security_and_session_headers(request: Request, call_next):
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["X-XSS-Protection"] = "1; mode=block"
     path = request.url.path
+    if path in ("/docs", "/redoc", "/openapi.json"):
+        # Swagger UI and ReDoc require CDN assets for interactive documentation UI
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+            "worker-src 'self' blob:; "
+            "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; "
+            "font-src 'self' https://fonts.gstatic.com data:; "
+            "img-src 'self' data: blob: https://fastapi.tiangolo.com; "
+            "connect-src 'self' http://127.0.0.1:* http://localhost:*; "
+            "object-src 'none'; "
+            "base-uri 'self'; "
+            "frame-ancestors 'none';"
+        )
+    else:
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline'; "
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+            "font-src 'self' https://fonts.gstatic.com data:; "
+            "img-src 'self' data: blob:; "
+            "connect-src 'self' http://127.0.0.1:* http://localhost:*; "
+            "object-src 'none'; "
+            "base-uri 'self'; "
+            "frame-ancestors 'none';"
+        )
     if path == "/" or path.endswith((".html", ".css", ".js")):
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
         response.headers["Pragma"] = "no-cache"
@@ -1004,33 +1220,92 @@ async def scan_uploaded_photo(
     if lighting not in {"ring_light", "daylight", "tube_light"}:
         raise HTTPException(status_code=422, detail="Unknown lighting profile.")
 
+    if (reference_length_mm is not None and reference_pixels is None) or (
+        reference_length_mm is None and reference_pixels is not None
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="Both reference_length_mm and reference_pixels must be provided together for physical reference calibration.",
+        )
+    if reference_length_mm is not None and reference_pixels is not None:
+        if reference_length_mm <= 0 or reference_pixels <= 0 or not np.isfinite(reference_length_mm) or not np.isfinite(reference_pixels):
+            raise HTTPException(
+                status_code=422, detail="Reference dimensions must be greater than zero."
+            )
+        ref_scale = reference_length_mm / reference_pixels
+        ref_area = ref_scale * ref_scale
+        if not np.isfinite(ref_scale) or not np.isfinite(ref_area) or ref_area < 1e-12:
+            raise HTTPException(
+                status_code=422, detail="Reference dimensions produce an unusable pixel area resolution."
+            )
+    if calibration_mm_per_pixel is not None:
+        cal_area = calibration_mm_per_pixel * calibration_mm_per_pixel
+        if calibration_mm_per_pixel <= 0 or not np.isfinite(calibration_mm_per_pixel) or not np.isfinite(cal_area) or cal_area < 1e-12:
+            raise HTTPException(
+                status_code=422, detail="calibration_mm_per_pixel must be a usable positive finite number."
+            )
+
+    await UPLOAD_CONCURRENCY_SEMAPHORE.acquire()
+    worker_started = False
     try:
         contents = await image.read(UPLOAD_MAX_BYTES + 1)
         if len(contents) > UPLOAD_MAX_BYTES:
             raise HTTPException(
                 status_code=413, detail="Photo must be 10 MB or smaller."
             )
-        decoded = cv2.imdecode(np.frombuffer(contents, dtype=np.uint8), cv2.IMREAD_COLOR)
-        if decoded is None:
+
+        # Pre-decode header validation and decompression bomb protection (Prompt 4)
+        try:
+            width, height, img_fmt = validate_image_header(
+                contents, max_bytes=UPLOAD_MAX_BYTES, max_pixels=UPLOAD_MAX_PIXELS
+            )
+        except OversizedFileError as exc:
+            raise HTTPException(status_code=413, detail="Photo must be 10 MB or smaller.") from exc
+        except DecompressionBombError as exc:
+            raise HTTPException(
+                status_code=413, detail="Photo dimensions must be 20 megapixels or smaller."
+            ) from exc
+        except (UnsupportedFormatError, CorruptImageError) as exc:
             raise HTTPException(
                 status_code=422, detail="Choose a valid JPEG, PNG, or WebP photo."
+            ) from exc
+
+        # Safe decoding and analysis under concurrency semaphore outside the event loop
+        def _worker_task() -> dict:
+            decoded = cv2.imdecode(np.frombuffer(contents, dtype=np.uint8), cv2.IMREAD_COLOR)
+            if decoded is None:
+                raise HTTPException(
+                    status_code=422, detail="Choose a valid JPEG, PNG, or WebP photo."
+                )
+
+            return _make_uploaded_batch(
+                decoded,
+                sample_name,
+                variety,
+                lighting,
+                raw_bytes=contents,
+                calibration_mm_per_pixel=calibration_mm_per_pixel,
+                reference_length_mm=reference_length_mm,
+                reference_pixels=reference_pixels,
             )
-        height, width = decoded.shape[:2]
-        if width * height > UPLOAD_MAX_PIXELS:
-            raise HTTPException(
-                status_code=413,
-                detail="Photo dimensions must be 20 megapixels or smaller.",
-            )
-        return _make_uploaded_batch(
-            decoded,
-            sample_name,
-            variety,
-            lighting,
-            raw_bytes=contents,
-            calibration_mm_per_pixel=calibration_mm_per_pixel,
-            reference_length_mm=reference_length_mm,
-            reference_pixels=reference_pixels,
-        )
+
+        loop = asyncio.get_running_loop()
+        future = loop.run_in_executor(None, _worker_task)
+        worker_started = True
+
+        def _on_worker_done(f):
+            try:
+                # Consume any exception if request was cancelled and no longer awaiting result
+                f.exception()
+            except Exception:
+                pass
+            finally:
+                UPLOAD_CONCURRENCY_SEMAPHORE.release()
+
+        # Hold permit until the executor thread finishes, including on request cancellation
+        future.add_done_callback(_on_worker_done)
+
+        return await asyncio.shield(future)
     except HTTPException:
         raise
     except Exception as exc:
@@ -1043,7 +1318,113 @@ async def scan_uploaded_photo(
             },
         )
     finally:
+        if not worker_started:
+            UPLOAD_CONCURRENCY_SEMAPHORE.release()
         await image.close()
+
+
+@app.post("/api/scan/hardware")
+def scan_hardware(
+    request_data: ScanHardwareRequest,
+    req: Request,
+    auth: str = Depends(verify_api_token),
+):
+    """Acquire photo from attached flatbed scanner and perform grain assessment."""
+    check_rate_limit(req)
+
+    clean_sample_name = request_data.sample_name.strip()
+    clean_variety = request_data.variety.strip()
+    if not clean_sample_name or len(clean_sample_name) > 80:
+        raise HTTPException(status_code=422, detail="Sample name must contain 1 to 80 characters.")
+    if not clean_variety or len(clean_variety) > 80:
+        raise HTTPException(status_code=422, detail="Rice variety must contain 1 to 80 characters.")
+
+    # Platform & environment support check
+    if not is_hardware_scan_supported():
+        return JSONResponse(
+            status_code=501,
+            content={
+                "error": "hardware_scan_unsupported",
+                "detail": "Direct hardware scanning requires a local Windows environment with an attached WIA-compatible scanner.",
+            },
+        )
+
+    # Remote access guard: reject non-loopback hardware scan triggers
+    client_host = req.client.host if req.client else "127.0.0.1"
+    if client_host not in ("127.0.0.1", "::1", "localhost", "testclient"):
+        return JSONResponse(
+            status_code=403,
+            content={
+                "error": "hardware_scan_forbidden",
+                "detail": "Hardware scanner acquisition is only permitted from local connections.",
+            },
+        )
+
+    if request_data.calibration_mm_per_pixel is not None:
+        cal_scale = request_data.calibration_mm_per_pixel
+        cal_area = cal_scale * cal_scale
+        if cal_scale <= 0 or not np.isfinite(cal_scale) or not np.isfinite(cal_area) or cal_area < 1e-12:
+            raise HTTPException(
+                status_code=422,
+                detail="calibration_mm_per_pixel must be a usable positive finite number.",
+            )
+
+    try:
+        image, raw_bytes = acquire_hardware_scan()
+        calib = resolve_scanner_calibration(
+            raw_bytes=raw_bytes,
+            image=image,
+            explicit_dpi=request_data.dpi,
+            explicit_scale=request_data.calibration_mm_per_pixel,
+        )
+        return _make_uploaded_batch(
+            image,
+            clean_sample_name,
+            clean_variety,
+            request_data.lighting,
+            raw_bytes=raw_bytes,
+            calibration_mm_per_pixel=calib["mm_per_pixel"],
+            calibration_status=calib["calibration_status"],
+            reference_type=calib["calibration_reference_type"],
+            scanner_dpi=calib["scanner_dpi"],
+            source_type="FLATBED_SCANNER",
+        )
+    except ScannerNotFoundError as exc:
+        LOGGER.warning("Hardware scanner acquisition failed: %s", exc)
+        return JSONResponse(
+            status_code=404,
+            content={
+                "error": "scanner_not_found",
+                "detail": "No scanner detected. Connect a scanner or upload a photo instead.",
+            },
+        )
+    except ScannerTimeoutError as exc:
+        LOGGER.warning("Hardware scanner acquisition timed out: %s", exc)
+        return JSONResponse(
+            status_code=504,
+            content={
+                "error": "scan_timeout",
+                "detail": "Scanner operation timed out. Please check the scanner and try again.",
+            },
+        )
+    except ScannerOperationError as exc:
+        LOGGER.error("Hardware scanner operation error: %s", exc)
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": "scan_failed",
+                "detail": "Scanner operation failed. Please check the scanner connection and try again.",
+            },
+        )
+    except Exception as exc:
+        LOGGER.exception("Unexpected error during hardware scan: %s", exc)
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": "scan_failed",
+                "detail": "The scan could not be completed. Please try again.",
+            },
+        )
 
 
 def _get_sorted_batch_list() -> list[dict]:
@@ -1057,17 +1438,30 @@ def _get_sorted_batch_list() -> list[dict]:
             results[batch["batch_id"]] = batch
 
     legacy_directory = DATA_DIR / "batches"
-    for path in legacy_directory.glob("AS-*/batch.json"):
+    disk_paths = list(legacy_directory.glob("AV-*/batch.json")) + list(legacy_directory.glob("AS-*/batch.json"))
+    for path in disk_paths:
+        # Skip reading and parsing recovery copies if this batch ID is already loaded from SQLite
+        if path.parent.name in results:
+            continue
         try:
             batch = json.loads(path.read_text(encoding="utf-8"))
-            if not isinstance(batch, dict) or "batch_id" not in batch or "created_at" not in batch:
+            if not isinstance(batch, dict):
                 continue
-            results.setdefault(batch["batch_id"], batch)
-        except (OSError, json.JSONDecodeError, KeyError):
+            b_id = batch.get("batch_id")
+            c_at = batch.get("created_at")
+            if not isinstance(b_id, str) or not b_id.strip():
+                LOGGER.warning("Skipping recovery file %s with invalid batch_id: %r", path, b_id)
+                continue
+            if not isinstance(c_at, str) or not c_at.strip():
+                LOGGER.warning("Skipping recovery file %s with invalid created_at: %r", path, c_at)
+                continue
+            results.setdefault(b_id, batch)
+        except (OSError, json.JSONDecodeError, KeyError, UnicodeDecodeError) as err:
+            LOGGER.warning("Skipping unreadable recovery file %s: %s", path, err)
             continue
     return sorted(
         results.values(),
-        key=lambda b: (b.get("created_at") if isinstance(b, dict) and b.get("created_at") is not None else ""),
+        key=lambda b: (str(b.get("created_at")) if isinstance(b, dict) and b.get("created_at") is not None else ""),
         reverse=True,
     )
 

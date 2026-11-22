@@ -1,6 +1,7 @@
 """Train and evaluate the grain classifier on grouped simulated scenes."""
 
 import argparse
+import hashlib
 import json
 import sys
 import tempfile
@@ -200,6 +201,29 @@ def train_classifier(
         destination,
     )
     print(f"Saved trained classifier to {destination}")
+
+    # Automatically compute SHA-256 and update manifest (AUDIT-07 / CR-01)
+    hasher = hashlib.sha256()
+    with open(destination, "rb") as f:
+        while chunk := f.read(65536):
+            hasher.update(chunk)
+    model_sha256 = hasher.hexdigest().lower()
+
+    # Only overwrite production model_manifest.json when training model.joblib
+    if destination.name == "model.joblib":
+        manifest_dest = destination.with_name("model_manifest.json")
+    else:
+        manifest_dest = destination.with_name(f"{destination.stem}_manifest.json")
+
+    manifest_data = {
+        "model_file": destination.name,
+        "sha256": model_sha256,
+        "training_scenes": scene_count * len(LIGHTING),
+        "accuracy": round(float(accuracy), 4),
+        "feature_names": list(FEATURE_NAMES),
+    }
+    manifest_dest.write_text(json.dumps(manifest_data, indent=2), encoding="utf-8")
+    print(f"Updated model manifest at {manifest_dest} (SHA-256: {model_sha256})")
     return {
         "accuracy": accuracy,
         "report": report,

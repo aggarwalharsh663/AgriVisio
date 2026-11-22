@@ -69,7 +69,10 @@
 	}
 
 	function isUploadedPhoto(record = batch) {
-		return Boolean(record?.images?.raw?.includes("/uploaded-photo.jpg"));
+		if (!record) return false;
+		if (record.simulated === false) return true;
+		if (record.measurement_status === "REAL_IMAGE_MEASUREMENT") return true;
+		return Boolean(record?.images?.raw && (record.images.raw.includes("/uploaded-photo.") || record.images.raw.includes("/uploaded-photo")));
 	}
 
 	function updateScanSource() {
@@ -110,13 +113,41 @@
 		}
 	}
 
-	function setLoading(loading) {
+	function isDesktopMode() {
+		return window.location.protocol === "app:" || Boolean(window.electronAPI);
+	}
+
+	let desktopAuthRecoveryPromise = null;
+	async function recoverDesktopSession() {
+		if (desktopAuthRecoveryPromise) {
+			return desktopAuthRecoveryPromise;
+		}
+		desktopAuthRecoveryPromise = (async () => {
+			try {
+				if (window.electronAPI && typeof window.electronAPI.reauthenticate === "function") {
+					const res = await window.electronAPI.reauthenticate();
+					if (res && res.success) {
+						return true;
+					}
+				}
+				const resp = await fetch("/api/auth/reauthenticate", { method: "POST" });
+				return resp.ok;
+			} catch (e) {
+				return false;
+			} finally {
+				desktopAuthRecoveryPromise = null;
+			}
+		})();
+		return desktopAuthRecoveryPromise;
+	}
+
+	function setLoading(loading, customLabel) {
 		scanButton.disabled = loading;
 		scanButton.classList.toggle("is-loading", loading);
 		const source = scanSource.value;
 		let label;
 		if (loading) {
-			label = source === "upload" ? "Analyzing photo..." : source === "scanner" ? "Scanning from flatbed..." : "Scanning sample...";
+			label = customLabel || (source === "upload" ? "Analyzing photo..." : source === "scanner" ? "Scanning from flatbed..." : "Scanning sample...");
 		} else {
 			label = source === "upload" ? "Upload & analyze photo" : source === "scanner" ? "Scan from flatbed scanner" : "Pour rice and scan";
 		}
@@ -199,10 +230,23 @@
 			if (range) range.hidden = true;
 			if (caption) caption.hidden = true;
 			if (tagRight) tagRight.hidden = true;
-			if (tagLeft) tagLeft.textContent = "Uploaded Photo - Standard View";
+			const isScanner = batch.calibration?.source_type === "FLATBED_SCANNER";
+			if (tagLeft) tagLeft.textContent = isScanner ? "Flatbed Scanner Capture" : "Uploaded Photo - Standard View";
 			document.querySelector("#error-before").textContent = "N/A";
 			document.querySelector("#error-after").textContent = "N/A";
-			document.querySelector("#improvement-text").textContent = "Direct camera capture - 0.12 mm/px scale";
+			const calib = batch.calibration || {};
+			let scaleNote = "Direct camera capture - 0.12 mm/px scale";
+			if (calib.calibration_status === "CALIBRATED") {
+				const scaleVal = calib.mm_per_pixel || 0.12;
+				if (calib.calibration_reference_type === "FLATBED_SCANNER_300DPI") {
+					scaleNote = `Calibrated flatbed scanner at 300 DPI (${scaleVal} mm/px)`;
+				} else if (calib.calibration_reference_type === "PHYSICAL_REFERENCE_OBJECT") {
+					scaleNote = `Calibrated with physical reference (${scaleVal} mm/px)`;
+				} else {
+					scaleNote = `Calibrated scale: ${scaleVal} mm/px`;
+				}
+			}
+			document.querySelector("#improvement-text").textContent = scaleNote;
 			return;
 		}
 
@@ -304,7 +348,7 @@
 			frameRequest = requestAnimationFrame(animateDetection);
 		};
 		image.onerror = () => {
-			document.querySelector("#scan-empty").textContent = "Could not load the simulated photo. Replay to try again.";
+			document.querySelector("#scan-empty").textContent = "Could not load the photo. Replay to try again.";
 		};
 		image.src = batch.images.calibrated;
 	}
@@ -382,9 +426,17 @@
 			mockBanner.style.display = isMock ? "flex" : "none";
 			mockBanner.hidden = !isMock;
 		}
+		const isCalibrated = Boolean(
+			batch.calibration?.calibration_status === "CALIBRATED" ||
+			batch.calibration?.calibrated === true
+		);
 		const uncalBanner = document.querySelector("#uncalibrated-warning-banner");
 		if (uncalBanner) {
-			const isUncal = Boolean(batch.calibration?.status === "uncalibrated" || (uploadedPhoto && !batch.calibration?.calibrated));
+			const isUncal = Boolean(
+				batch.calibration?.calibration_status === "UNCALIBRATED" ||
+				batch.calibration?.status === "uncalibrated" ||
+				(uploadedPhoto && !isCalibrated)
+			);
 			uncalBanner.style.display = isUncal ? "flex" : "none";
 			uncalBanner.hidden = !isUncal;
 		}
@@ -404,17 +456,29 @@
 			document.querySelector("#warning-count").textContent = `${lowConf} grains (${pct}% of sample) have borderline optical confidence. You can inspect and sort them in the grain details table below.`;
 		}
 		document.querySelector("#report-legend").innerHTML = categories.map(({ key, label, css }) => `<div class="quality-row"><i class="legend-dot ${css}"></i><span>${label} · ${summary.percent[key] ?? 0}%</span><strong>${summary.counts[key] ?? 0}</strong></div>`).join("");
-		document.querySelector("#mean-length-note").textContent = uploadedPhoto ? "estimated mm · assumed scale" : "millimetres";
-		document.querySelector("#mean-width-note").textContent = uploadedPhoto ? "estimated mm · assumed scale" : "millimetres";
-		document.querySelector("#length-chart-footnote").textContent = uploadedPhoto
-			? "Estimated millimetres · assumed 0.12 mm/pixel"
-			: "Length in millimetres · simulated measurements";
-		document.querySelector("#validation-note").textContent = uploadedPhoto
-			? "not available for uploaded photos (no ground truth)"
-			: "validated against simulator ground truth";
-		document.querySelector("#report-note-text").innerHTML = uploadedPhoto
-			? "<strong>Uploaded photo · estimated measurements.</strong> Millimetres assume 0.12 mm/pixel because no calibration card was provided. Grain classes come from a model trained on simulated samples; validation against photo ground truth is unavailable. The camera and chamber remain simulated; this is not a laboratory result."
-			: "<strong>Simulated hardware demo.</strong> Camera, chamber lighting, grain detection, and measurements are simulated. This report is for demonstration and is not a laboratory result.";
+		
+		const calScaleStr = batch.calibration?.mm_per_pixel ? Number(batch.calibration.mm_per_pixel).toFixed(4) : "calibrated";
+		if (uploadedPhoto) {
+			if (isCalibrated) {
+				document.querySelector("#mean-length-note").textContent = "calibrated mm";
+				document.querySelector("#mean-width-note").textContent = "calibrated mm";
+				document.querySelector("#length-chart-footnote").textContent = `Calibrated millimetres · ${calScaleStr} mm/pixel`;
+				document.querySelector("#validation-note").textContent = "calibrated against reference target";
+				document.querySelector("#report-note-text").innerHTML = `<strong>Uploaded photo · calibrated measurements.</strong> Scale: ${calScaleStr} mm/pixel (${escapeHtml(batch.calibration?.calibration_reference_type || "calibrated reference")}). Grain classes come from optical analysis. This is an optical assessment report.`;
+			} else {
+				document.querySelector("#mean-length-note").textContent = "estimated mm · assumed scale";
+				document.querySelector("#mean-width-note").textContent = "estimated mm · assumed scale";
+				document.querySelector("#length-chart-footnote").textContent = "Estimated millimetres · assumed 0.12 mm/pixel";
+				document.querySelector("#validation-note").textContent = "not available for uploaded photos (no ground truth)";
+				document.querySelector("#report-note-text").innerHTML = "<strong>Uploaded photo · estimated measurements.</strong> Millimetres assume 0.12 mm/pixel because no calibration card was provided. Grain classes come from a model trained on simulated samples; validation against photo ground truth is unavailable. The camera and chamber remain simulated; this is not a laboratory result.";
+			}
+		} else {
+			document.querySelector("#mean-length-note").textContent = "millimetres";
+			document.querySelector("#mean-width-note").textContent = "millimetres";
+			document.querySelector("#length-chart-footnote").textContent = "Length in millimetres · simulated measurements";
+			document.querySelector("#validation-note").textContent = "validated against simulator ground truth";
+			document.querySelector("#report-note-text").innerHTML = "<strong>Simulated hardware demo.</strong> Camera, chamber lighting, grain detection, and measurements are simulated. This report is for demonstration and is not a laboratory result.";
+		}
 		document.querySelector("#validation-content").hidden = uploadedPhoto;
 		document.querySelector("#validation-accuracy").textContent = uploadedPhoto
 			? "N/A"
@@ -533,7 +597,10 @@
 		const qr = document.querySelector("#batch-qr");
 		qr.replaceChildren();
 		if (typeof window.QRCode === "function") {
-			new window.QRCode(qr, { text: `${window.location.origin}/api/batches/${encodeURIComponent(batch.batch_id)}`, width: 92, height: 92, colorDark: "#000000", colorLight: "#ffffff", correctLevel: window.QRCode.CorrectLevel.M });
+			const qrText = isDesktopMode()
+				? `AGRIVISIO:BATCH:${batch.batch_id}:FP:${batch.fingerprint?.hash || batch.batch_id}`
+				: `${window.location.origin}/api/batches/${encodeURIComponent(batch.batch_id)}`;
+			new window.QRCode(qr, { text: qrText, width: 92, height: 92, colorDark: "#000000", colorLight: "#ffffff", correctLevel: window.QRCode.CorrectLevel.M });
 		} else {
 			qr.textContent = "QR unavailable";
 		}
@@ -637,12 +704,25 @@
 		const body = document.querySelector("#history-table-body");
 		status.textContent = "Loading batch history…";
 		try {
-			const response = await fetch("/api/batches");
+			let response = await fetch("/api/batches");
+			if (response.status === 401) {
+				if (isDesktopMode()) {
+					const recovered = await recoverDesktopSession();
+					if (recovered) {
+						response = await fetch("/api/batches");
+					}
+				} else {
+					showLoginModal();
+					throw new Error("Session expired or unauthenticated. Please re-authenticate.");
+				}
+			}
 			if (!response.ok) throw new Error("History is temporarily unavailable.");
 			const history = await response.json();
-			document.querySelector("#history-count").textContent = String(history.length);
+			const items = Array.isArray(history) ? history : (history?.items || []);
+			const totalCount = Array.isArray(history) ? history.length : (history?.total ?? items.length);
+			document.querySelector("#history-count").textContent = String(totalCount);
 			body.replaceChildren();
-			for (const item of history) {
+			for (const item of items) {
 				const row = document.createElement("tr");
 				const values = [item.batch_id, item.sample_name, item.variety, new Date(item.created_at).toLocaleString(), String(item.summary?.total_grains ?? 0)];
 				values.forEach((value) => { const cell = document.createElement("td"); cell.textContent = value; row.append(cell); });
@@ -658,15 +738,26 @@
 				row.append(action);
 				body.append(row);
 			}
-			status.textContent = history.length ? `${history.length} simulated assessment${history.length === 1 ? "" : "s"} in local history.` : "No saved batches yet.";
+			status.textContent = items.length ? `${items.length} assessment${items.length === 1 ? "" : "s"} in local history.` : "No saved batches yet.";
 		} catch (error) {
-			status.textContent = error.message || "History could not be loaded. Check the simulated backend and retry.";
+			status.textContent = error.message || "History could not be loaded. Check that the service is running and retry.";
 		}
 	}
 
 	async function openHistoryBatch(batchId) {
 		try {
-			const response = await fetch(`/api/batches/${encodeURIComponent(batchId)}`);
+			let response = await fetch(`/api/batches/${encodeURIComponent(batchId)}`);
+			if (response.status === 401) {
+				if (isDesktopMode()) {
+					const recovered = await recoverDesktopSession();
+					if (recovered) {
+						response = await fetch(`/api/batches/${encodeURIComponent(batchId)}`);
+					}
+				} else {
+					showLoginModal();
+					throw new Error("Session expired or unauthenticated. Please re-authenticate.");
+				}
+			}
 			if (!response.ok) throw new Error("This batch could not be opened.");
 			batch = await response.json();
 			furthestStep = 4;
@@ -680,6 +771,9 @@
 				canvas.width = preview.naturalWidth;
 				canvas.height = preview.naturalHeight;
 				drawDetections(canvas.width, batch.grains.length);
+			};
+			preview.onerror = () => {
+				document.querySelector("#history-status").textContent = `Could not load image for batch ${batchId}.`;
 			};
 			preview.src = batch.images.calibrated;
 			announce(`Opened saved assessment ${batch.batch_id}`);
@@ -803,7 +897,7 @@
 		const safeBatchId = escapeHtml(batchId || currentBatch?.batch_id || "Report");
 
 		const isMockData = Boolean(currentBatch?.is_mock || currentBatch?.simulated);
-		const isUncalibrated = Boolean(currentBatch?.calibration?.status === "uncalibrated");
+		const isUncalibrated = Boolean(currentBatch?.calibration?.calibration_status === "UNCALIBRATED" || currentBatch?.calibration?.status === "uncalibrated");
 
 		const grains = currentBatch?.grains || [];
 		let rowsHtml = "";
@@ -925,6 +1019,18 @@
 				formData.append("sample_name", payload.sample_name);
 				formData.append("variety", payload.variety);
 				formData.append("lighting", payload.lighting);
+				const calibInput = document.querySelector("#calibration-mm-per-pixel") || document.querySelector("[name='calibration_mm_per_pixel']");
+				if (calibInput && calibInput.value.trim()) {
+					formData.append("calibration_mm_per_pixel", calibInput.value.trim());
+				}
+				const refLenInput = document.querySelector("#reference-length-mm") || document.querySelector("[name='reference_length_mm']");
+				if (refLenInput && refLenInput.value.trim()) {
+					formData.append("reference_length_mm", refLenInput.value.trim());
+				}
+				const refPixInput = document.querySelector("#reference-pixels") || document.querySelector("[name='reference_pixels']");
+				if (refPixInput && refPixInput.value.trim()) {
+					formData.append("reference_pixels", refPixInput.value.trim());
+				}
 				endpoint = "/api/scan/upload";
 				requestOptions = { method: "POST", body: formData };
 			} else {
@@ -938,15 +1044,51 @@
 			}
 			let response = await fetch(endpoint, requestOptions);
 			if (response.status === 401) {
+				if (isDesktopMode()) {
+					setLoading(true, "Session expired. Re-authenticating...");
+					const recovered = await recoverDesktopSession();
+					if (recovered) {
+						setLoading(true, "Retrying analysis...");
+						if (uploadingPhoto && photo) {
+							const retryFormData = new FormData();
+							retryFormData.append("image", photo);
+							retryFormData.append("sample_name", payload.sample_name);
+							retryFormData.append("variety", payload.variety);
+							retryFormData.append("lighting", payload.lighting);
+							const calibInput = document.querySelector("#calibration-mm-per-pixel") || document.querySelector("[name='calibration_mm_per_pixel']");
+							if (calibInput && calibInput.value.trim()) {
+								retryFormData.append("calibration_mm_per_pixel", calibInput.value.trim());
+							}
+							const refLenInput = document.querySelector("#reference-length-mm") || document.querySelector("[name='reference_length_mm']");
+							if (refLenInput && refLenInput.value.trim()) {
+								retryFormData.append("reference_length_mm", refLenInput.value.trim());
+							}
+							const refPixInput = document.querySelector("#reference-pixels") || document.querySelector("[name='reference_pixels']");
+							if (refPixInput && refPixInput.value.trim()) {
+								retryFormData.append("reference_pixels", refPixInput.value.trim());
+							}
+							requestOptions = { method: "POST", body: retryFormData };
+						}
+						// Retry the original request exactly once
+						response = await fetch(endpoint, requestOptions);
+					} else {
+						throw new Error("Desktop session expired and automatic re-authentication failed. Please restart AgriVisio.");
+					}
+				} else {
+					showLoginModal();
+					throw new Error("Session expired or unauthenticated. Please re-authenticate.");
+				}
+			}
+			if (response.status === 401) {
 				if (!isDesktopMode()) {
 					showLoginModal();
 				}
-				throw new Error("Session expired or unauthenticated. Please re-authenticate.");
+				throw new Error("Session expired or unauthenticated after re-authentication attempt.");
 			}
 			let result = await response.json().catch(() => ({}));
-			if (scanningHardware && !response.ok && result.error === "scanner_not_found") {
+			if (scanningHardware && !response.ok && (result.error === "scanner_not_found" || result.error === "hardware_scan_unsupported")) {
 				setLoading(false);
-				showFriendlyError("No flatbed scanner detected. Please select a rice photo to upload instead.");
+				showFriendlyError(result.detail || "No flatbed scanner detected. Please select a rice photo to upload instead.");
 				scanSource.value = "upload";
 				updateScanSource();
 				return;
@@ -1028,8 +1170,6 @@
 	const loginError = document.querySelector("#login-error");
 	const loginBtn = document.querySelector("#login-submit-btn");
 	const logoutBtn = document.querySelector("#logout-btn");
-
-	const isDesktopMode = () => window.location.protocol === "app:" || Boolean(window.electronAPI);
 
 	function showLoginModal() {
 		if (isDesktopMode()) return;

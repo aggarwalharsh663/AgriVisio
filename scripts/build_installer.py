@@ -41,7 +41,7 @@ EXCLUDE_FILENAME_PATTERNS = [
 ]
 
 
-def is_excluded_path(rel_path: Path) -> bool:
+def is_excluded_path(rel_path: Path, bundle_runtime: bool = False) -> bool:
     rel_str = str(rel_path).replace("\\", "/")
     filename = rel_path.name
 
@@ -49,8 +49,12 @@ def is_excluded_path(rel_path: Path) -> bool:
     if filename in (".env.example", ".env.sample", ".env.template"):
         return False
 
+    excludes = list(EXCLUDE_PATTERNS)
+    if bundle_runtime:
+        excludes = [x for x in excludes if x != "electron/dist"]
+
     # Check directory and substring patterns
-    if any(exc in rel_str for exc in EXCLUDE_PATTERNS):
+    if any(exc in rel_str for exc in excludes):
         return True
 
     # Check sensitive filename patterns
@@ -79,6 +83,113 @@ def compute_sha256(file_path: Path) -> str:
         while chunk := f.read(65536):
             hasher.update(chunk)
     return hasher.hexdigest().upper()
+
+
+REQUIRED_ELECTRON_FILES = ("electron.exe", "icudtl.dat", "resources.pak", "v8_context_snapshot.bin")
+REQUIRED_PYTHON_FILES = ("python.exe", "python3.dll", f"python3{sys.version_info.minor}.dll")
+REQUIRED_PYTHON_DIRS = ("Lib",)
+
+
+def is_complete_electron_dist(dist_dir: Path | None) -> bool:
+    if dist_dir is None or not dist_dir.is_dir():
+        return False
+    return all((dist_dir / req).is_file() for req in REQUIRED_ELECTRON_FILES)
+
+
+def is_complete_python_dist(dist_dir: Path | None) -> bool:
+    if dist_dir is None or not dist_dir.is_dir():
+        return False
+    has_files = all((dist_dir / req).is_file() for req in REQUIRED_PYTHON_FILES)
+    has_dirs = all((dist_dir / req).is_dir() for req in REQUIRED_PYTHON_DIRS)
+    return has_files and has_dirs
+
+
+def build_payload_zip(tmp_payload: Path, bundle_runtime: bool = False) -> Path:
+    """Build the installation payload ZIP archive with strict exclusion and runtime validation."""
+    local_app_data_env = os.getenv("LOCALAPPDATA")
+    local_app_data = Path(local_app_data_env) / "Programs" / "AgriVisio" if local_app_data_env and os.path.isabs(local_app_data_env) else None
+    installed_python = (local_app_data / "backend" / "python") if local_app_data else None
+    installed_electron = (local_app_data / "electron" / "dist") if local_app_data else None
+
+    python_source_dir = None
+    if bundle_runtime:
+        repo_python_dir = ROOT_DIR / "backend" / "python"
+        if is_complete_python_dist(repo_python_dir):
+            python_source_dir = repo_python_dir
+        elif is_complete_python_dist(installed_python):
+            python_source_dir = installed_python
+        else:
+            raise RuntimeError(
+                "Runtime bundling requested (--bundle-runtime) but neither repository "
+                "nor installed Python distribution is complete (must include python.exe, python3.dll, versioned core DLL, and Lib/)."
+            )
+
+    electron_dist_source_dir = None
+    if bundle_runtime:
+        repo_electron_dir = ROOT_DIR / "electron" / "dist"
+        if is_complete_electron_dist(repo_electron_dir):
+            electron_dist_source_dir = repo_electron_dir
+        elif is_complete_electron_dist(installed_electron):
+            electron_dist_source_dir = installed_electron
+        else:
+            raise RuntimeError(
+                "Runtime bundling requested (--bundle-runtime) but neither repository "
+                "nor installed Electron distribution is complete (must include electron.exe, icudtl.dat, resources.pak, v8_context_snapshot.bin)."
+            )
+
+    with zipfile.ZipFile(tmp_payload, "w", zipfile.ZIP_DEFLATED) as zf:
+        for fname in [
+            "AgriVisio.bat",
+            "AgriVisio.exe",
+            "app_icon.ico", "agrivisio_icon.ico", "LICENSE", "README.md", "requirements.txt",
+        ]:
+            fpath = ROOT_DIR / fname
+            if fpath.is_file():
+                zf.write(fpath, arcname=fname)
+
+        for dir_name in ["backend", "frontend", "electron"]:
+            src_dir = ROOT_DIR / dir_name
+            if not src_dir.is_dir():
+                continue
+            for item in src_dir.rglob("*"):
+                if item.is_file():
+                    rel = item.relative_to(ROOT_DIR)
+                    rel_str = str(rel).replace("\\", "/")
+
+                    # Exclude runtime folders from generic traversal; handled exclusively below
+                    if rel_str.startswith("backend/python/") or rel_str == "backend/python":
+                        continue
+                    if rel_str.startswith("electron/dist/") or rel_str == "electron/dist":
+                        continue
+
+                    if is_excluded_path(rel, bundle_runtime=bundle_runtime):
+                        continue
+                    scan_file_for_secrets(item)
+                    zf.write(item, arcname=str(rel))
+
+        if python_source_dir is not None:
+            print(f"Bundling portable Python runtime from {python_source_dir}...")
+            for py_item in python_source_dir.rglob("*"):
+                if py_item.is_file():
+                    rel_py = py_item.relative_to(python_source_dir)
+                    if is_excluded_path(Path("backend/python") / rel_py, bundle_runtime=True):
+                        continue
+                    scan_file_for_secrets(py_item)
+                    arc = "backend/python/" + str(rel_py).replace("\\", "/")
+                    zf.write(py_item, arcname=arc)
+
+        if electron_dist_source_dir is not None:
+            print(f"Bundling portable Electron runtime from {electron_dist_source_dir}...")
+            for el_item in electron_dist_source_dir.rglob("*"):
+                if el_item.is_file():
+                    rel_el = el_item.relative_to(electron_dist_source_dir)
+                    if is_excluded_path(Path("electron/dist") / rel_el, bundle_runtime=True):
+                        continue
+                    scan_file_for_secrets(el_item)
+                    arc = "electron/dist/" + str(rel_el).replace("\\", "/")
+                    zf.write(el_item, arcname=arc)
+
+    return tmp_payload
 
 
 def build_installer(output_exe: Path | None = None) -> Path:
@@ -110,33 +221,16 @@ def build_installer(output_exe: Path | None = None) -> Path:
         if res_l.returncode != 0:
             print("Warning: Launcher compilation failed:", res_l.stderr)
 
+    bundle_runtime = (
+        "--bundle-runtime" in sys.argv
+        or os.getenv("AGRIVISIO_BUNDLE_RUNTIME", "0").lower() in ("1", "true", "yes")
+    )
+
     print("--- [1/4] Building installation payload ZIP ---")
     tmp_payload = ROOT_DIR / "agrivisio_payload.zip"
 
     try:
-        with zipfile.ZipFile(tmp_payload, "w", zipfile.ZIP_DEFLATED) as zf:
-            for fname in [
-                "AgriVisio.bat",
-                "AgriVisio.exe",
-                "app_icon.ico", "agrivisio_icon.ico", "LICENSE", "README.md", "requirements.txt",
-            ]:
-                fpath = ROOT_DIR / fname
-                if fpath.is_file():
-                    zf.write(fpath, arcname=fname)
-
-            for dir_name in ["backend", "frontend", "electron"]:
-                src_dir = ROOT_DIR / dir_name
-                if not src_dir.is_dir():
-                    continue
-                for item in src_dir.rglob("*"):
-                    if item.is_file():
-                        rel = item.relative_to(ROOT_DIR)
-                        rel_str = str(rel).replace("\\", "/")
-                        if is_excluded_path(rel):
-                            continue
-                        scan_file_for_secrets(item)
-                        zf.write(item, arcname=str(rel))
-
+        build_payload_zip(tmp_payload, bundle_runtime=bundle_runtime)
         payload_size_mb = tmp_payload.stat().st_size / (1024 * 1024)
         print(f"Payload created: {payload_size_mb:.2f} MB")
 
@@ -162,6 +256,7 @@ def build_installer(output_exe: Path | None = None) -> Path:
             f"/win32manifest:{installer_manifest}",
             "/reference:System.IO.Compression.dll",
             "/reference:System.IO.Compression.FileSystem.dll",
+            "/reference:System.Management.dll",
             f"/resource:{tmp_payload},agrivisio_payload.zip",
             f"/resource:{ROOT_DIR / 'frontend' / 'assets' / 'emblem.png'},app_emblem.png",
             str(setup_cs),

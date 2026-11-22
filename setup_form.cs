@@ -39,7 +39,7 @@ namespace AgriVisioSetup
 
         // Configurable expected SHA-256 checksum for agrivisio_payload.zip
         // If empty or null, integrity verification uses embedded manifest or validates stream readable
-        public static string ExpectedPayloadSha256 = "59D3943425470578A134900F53EA7C05DF5AE40117B16040638BD2F4E86211F4";
+        public static string ExpectedPayloadSha256 = "780AD0E1D27490806EEE18EF61113D313779E080D9D0A5DB0D5F0D5046E60BAF";
 
                 /// <summary>
         /// Constant-time comparison of two hex hash strings to prevent timing side-channels (S-03).
@@ -274,37 +274,522 @@ namespace AgriVisioSetup
             return true;
         }
 
-        /// <summary>
-        /// Gracefully requests any currently open AgriVisio application instances in target directory to close.
-        /// Does not perform forceful process termination.
-        /// </summary>
-        private void CloseExistingAgriVisioProcesses(string targetDir)
+        public static int GracefulShutdownTimeoutMs = 8000;
+        public static int ForceKillTimeoutMs = 3000;
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr OpenProcess(uint processAccess, bool bInheritHandle, int processId);
+
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+        private static extern bool QueryFullProcessImageName(IntPtr hProcess, int dwFlags, StringBuilder lpExeName, ref int lpdwSize);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool CloseHandle(IntPtr hObject);
+
+        private const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
+
+        private static string GetProcessPath(Process p)
         {
             try
             {
-                string canonicalTarget = Path.GetFullPath(targetDir).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                if (p.MainModule != null)
+                {
+                    return Path.GetFullPath(p.MainModule.FileName);
+                }
+            }
+            catch
+            {
+                // Fall back to QueryFullProcessImageName for 32-bit / 64-bit cross-architecture access
+            }
 
-                // Gracefully request application processes to close their main window
-                var procs = new List<Process>();
-                procs.AddRange(Process.GetProcessesByName("AgriVisio"));
-                foreach (var p in procs)
+            try
+            {
+                IntPtr hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, p.Id);
+                if (hProc != IntPtr.Zero)
                 {
                     try
                     {
-                        if (p.MainModule != null)
+                        var sb = new StringBuilder(1024);
+                        int size = sb.Capacity;
+                        if (QueryFullProcessImageName(hProc, 0, sb, ref size))
                         {
-                            string exePath = Path.GetFullPath(p.MainModule.FileName);
-                            if (exePath.StartsWith(canonicalTarget, StringComparison.OrdinalIgnoreCase))
+                            return Path.GetFullPath(sb.ToString());
+                        }
+                    }
+                    finally
+                    {
+                        CloseHandle(hProc);
+                    }
+                }
+            }
+            catch
+            {
+            }
+            return null;
+        }
+
+        private static string GetProcessCommandLine(Process p)
+        {
+            try
+            {
+                using (var searcher = new System.Management.ManagementObjectSearcher(
+                    string.Format("SELECT CommandLine FROM Win32_Process WHERE ProcessId = {0}", p.Id)))
+                using (var collection = searcher.Get())
+                {
+                    foreach (var item in collection)
+                    {
+                        object val = item["CommandLine"];
+                        if (val != null)
+                        {
+                            return val.ToString();
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // Access denied or WMI unavailable
+            }
+            return null;
+        }
+
+        private static string[] SplitCommandLineArguments(string commandLine)
+        {
+            var parts = new List<string>();
+            if (string.IsNullOrEmpty(commandLine))
+                return parts.ToArray();
+
+            var current = new StringBuilder();
+            bool inQuotes = false;
+            for (int i = 0; i < commandLine.Length; i++)
+            {
+                char c = commandLine[i];
+                if (c == '"')
+                {
+                    inQuotes = !inQuotes;
+                }
+                else if (char.IsWhiteSpace(c) && !inQuotes)
+                {
+                    if (current.Length > 0)
+                    {
+                        parts.Add(current.ToString());
+                        current.Length = 0;
+                    }
+                    continue;
+                }
+                current.Append(c);
+            }
+            if (current.Length > 0)
+            {
+                parts.Add(current.ToString());
+            }
+            return parts.ToArray();
+        }
+
+        private static bool IsAgriVisioPythonProcess(string cmdLine)
+        {
+            if (string.IsNullOrWhiteSpace(cmdLine))
+                return false;
+
+            string[] tokens = SplitCommandLineArguments(cmdLine);
+            bool nextIsModule = false;
+            for (int i = 1; i < tokens.Length; i++)
+            {
+                string token = tokens[i].Trim('"', ' ');
+                if (string.IsNullOrEmpty(token))
+                    continue;
+
+                if (nextIsModule)
+                {
+                    if (string.Equals(token, "backend.main", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(token, "backend.ipc_worker", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(token, "main", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return true;
+                    }
+                    nextIsModule = false;
+                    continue;
+                }
+
+                if (string.Equals(token, "-m", StringComparison.OrdinalIgnoreCase))
+                {
+                    nextIsModule = true;
+                    continue;
+                }
+
+                if (token.StartsWith("-"))
+                {
+                    continue;
+                }
+
+                string scriptName = Path.GetFileName(token);
+                if (string.Equals(scriptName, "ipc_worker.py", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(scriptName, "main.py", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+
+                return false;
+            }
+
+            return false;
+        }
+
+        private static bool IsAgriVisioInstallation(string targetDir)
+        {
+            if (string.IsNullOrEmpty(targetDir) || !Directory.Exists(targetDir)) return false;
+            return File.Exists(Path.Combine(targetDir, "AgriVisio.exe")) ||
+                   File.Exists(Path.Combine(targetDir, "AgriVisio.bat")) ||
+                   File.Exists(Path.Combine(targetDir, "backend", "ipc_worker.py")) ||
+                   (File.Exists(Path.Combine(targetDir, "electron", "main.cjs")) &&
+                    (File.Exists(Path.Combine(targetDir, "frontend", "index.html")) ||
+                     File.Exists(Path.Combine(targetDir, "backend", "main.py"))));
+        }
+
+        /// <summary>
+        /// Identifies all running processes originating from or holding modules inside target directory.
+        /// Never matches or terminates unrelated system or third-party processes.
+        /// </summary>
+        public static List<Process> GetAgriVisioProcessesInDirectory(string targetDir)
+        {
+            bool unused;
+            return GetAgriVisioProcessesInDirectory(targetDir, null, out unused);
+        }
+
+        public static List<Process> GetAgriVisioProcessesInDirectory(string targetDir, HashSet<int> knownPids, out bool hasUnverifiedProcesses)
+        {
+            hasUnverifiedProcesses = false;
+            var matching = new List<Process>();
+            if (string.IsNullOrEmpty(targetDir)) return matching;
+
+            string canonicalTarget;
+            try
+            {
+                canonicalTarget = Path.GetFullPath(targetDir).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            }
+            catch
+            {
+                return matching;
+            }
+
+            string prefixWithSep = canonicalTarget + Path.DirectorySeparatorChar;
+            bool isVerifiedAgriVisio = IsAgriVisioInstallation(canonicalTarget);
+            int currentPid = Process.GetCurrentProcess().Id;
+
+            foreach (Process p in Process.GetProcesses())
+            {
+                try
+                {
+                    if (p.Id == currentPid)
+                        continue;
+
+                    string exePath = GetProcessPath(p);
+
+                    if (!string.IsNullOrEmpty(exePath))
+                    {
+                        if (exePath.StartsWith(prefixWithSep, StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(exePath, canonicalTarget, StringComparison.OrdinalIgnoreCase))
+                        {
+                            string relPath = exePath.StartsWith(prefixWithSep, StringComparison.OrdinalIgnoreCase)
+                                ? exePath.Substring(prefixWithSep.Length).Replace('/', '\\')
+                                : Path.GetFileName(exePath);
+
+                            // Only close recognized AgriVisio processes under known installation paths (CR-08 & Finding 15)
+                            bool isAgriVisioProcess = false;
+                            if (string.Equals(relPath, "AgriVisio.exe", StringComparison.OrdinalIgnoreCase) ||
+                                string.Equals(relPath, "AgriVisio.bat", StringComparison.OrdinalIgnoreCase))
                             {
-                                p.CloseMainWindow();
-                                p.WaitForExit(1500);
+                                isAgriVisioProcess = true;
                             }
+                            else if (isVerifiedAgriVisio && (
+                                string.Equals(relPath, @"electron\dist\electron.exe", StringComparison.OrdinalIgnoreCase)))
+                            {
+                                isAgriVisioProcess = true;
+                            }
+                            else if (isVerifiedAgriVisio && (
+                                string.Equals(relPath, @"backend\python\python.exe", StringComparison.OrdinalIgnoreCase) ||
+                                string.Equals(relPath, @"backend\python\pythonw.exe", StringComparison.OrdinalIgnoreCase)))
+                            {
+                                if (knownPids != null && knownPids.Contains(p.Id))
+                                {
+                                    // Recheck liveness of already identified worker independently of WMI
+                                    if (!p.HasExited)
+                                    {
+                                        isAgriVisioProcess = true;
+                                    }
+                                }
+                                else
+                                {
+                                    string cmdLine = GetProcessCommandLine(p);
+                                    if (cmdLine == null)
+                                    {
+                                        // WMI lookup failed or unreadable: keep distinct from confirmed non-match
+                                        hasUnverifiedProcesses = true;
+                                    }
+                                    else if (IsAgriVisioPythonProcess(cmdLine))
+                                    {
+                                        isAgriVisioProcess = true;
+                                    }
+                                }
+                            }
+
+                            if (isAgriVisioProcess)
+                            {
+                                matching.Add(p);
+                            }
+                        }
+                    }
+                }
+                catch
+                {
+                    // Process may have exited during enumeration
+                }
+            }
+
+            return matching;
+        }
+
+        /// <summary>
+        /// Gracefully requests any running AgriVisio processes in the target installation folder to exit.
+        /// Waits up to GracefulShutdownTimeoutMs, and prompts the user if processes remain unresponsive.
+        /// Returns true if all processes in targetDir are verified closed; otherwise false.
+        /// </summary>
+        private bool EnsureProcessesClosed(string targetDir)
+        {
+            string canonicalTarget = Path.GetFullPath(targetDir).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            HashSet<int> knownPids = new HashSet<int>();
+
+            while (true)
+            {
+                bool hasUnverified = false;
+                List<Process> procs = GetAgriVisioProcessesInDirectory(canonicalTarget, knownPids, out hasUnverified);
+                foreach (Process p in procs)
+                {
+                    knownPids.Add(p.Id);
+                }
+
+                if (procs.Count == 0 && !hasUnverified)
+                {
+                    return true;
+                }
+
+                if (hasUnverified && procs.Count == 0)
+                {
+                    DialogResult choice = DialogResult.None;
+                    this.Invoke((MethodInvoker)delegate
+                    {
+                        choice = MessageBox.Show(
+                            string.Format(
+                                "An application process running from '{0}' could not be verified automatically.\n\n" +
+                                "Please close all running applications and click 'Retry', or click 'Cancel' to abort installation safely.",
+                                canonicalTarget
+                            ),
+                            "Process Verification Required",
+                            MessageBoxButtons.RetryCancel,
+                            MessageBoxIcon.Warning
+                        );
+                    });
+                    if (choice == DialogResult.Cancel)
+                    {
+                        return false;
+                    }
+                    continue;
+                }
+
+                // Phase 1: Request graceful exit
+                foreach (Process p in procs)
+                {
+                    try
+                    {
+                        if (p.MainWindowHandle != IntPtr.Zero)
+                        {
+                            p.CloseMainWindow();
                         }
                     }
                     catch { }
                 }
+
+                // Phase 2: Wait and poll for process termination using monotonic Stopwatch
+                Stopwatch sw = Stopwatch.StartNew();
+                int waitIntervalMs = 250;
+                bool allExited = false;
+
+                while (sw.ElapsedMilliseconds < GracefulShutdownTimeoutMs)
+                {
+                    Thread.Sleep(waitIntervalMs);
+
+                    List<Process> current = GetAgriVisioProcessesInDirectory(canonicalTarget, knownPids, out hasUnverified);
+                    if (current.Count == 0 && !hasUnverified)
+                    {
+                        allExited = true;
+                        break;
+                    }
+                }
+
+                if (allExited)
+                {
+                    return true;
+                }
+
+                // Phase 3: Processes still running after graceful timeout
+                List<Process> remaining = GetAgriVisioProcessesInDirectory(canonicalTarget, knownPids, out hasUnverified);
+                if (remaining.Count == 0 && !hasUnverified)
+                {
+                    return true;
+                }
+
+                StringBuilder sb = new StringBuilder();
+                foreach (Process p in remaining)
+                {
+                    sb.AppendLine(string.Format("• {0} (PID: {1})", p.ProcessName, p.Id));
+                }
+
+                DialogResult dlgChoice = DialogResult.None;
+                this.Invoke((MethodInvoker)delegate
+                {
+                    dlgChoice = MessageBox.Show(
+                        string.Format(
+                            "AgriVisio is currently running and could not be closed automatically:\n\n{0}\n" +
+                            "Installation files in '{1}' remain locked.\n\n" +
+                            "Please save your work and close AgriVisio to continue installation.\n\n" +
+                            "• Click 'Retry' once AgriVisio has been closed.\n" +
+                            "• Click 'Cancel' to abort installation safely.",
+                            sb.ToString(), canonicalTarget
+                        ),
+                        "AgriVisio Currently Running",
+                        MessageBoxButtons.RetryCancel,
+                        MessageBoxIcon.Warning
+                    );
+                });
+
+                if (dlgChoice == DialogResult.Cancel)
+                {
+                    return false;
+                }
+                else if (dlgChoice == DialogResult.Retry)
+                {
+                    // Loop back and re-check process state
+                    continue;
+                }
             }
-            catch { }
+        }
+
+        /// <summary>
+        /// Backward-compatible wrapper for closing AgriVisio processes.
+        /// </summary>
+        private void CloseExistingAgriVisioProcesses(string targetDir)
+        {
+            EnsureProcessesClosed(targetDir);
+        }
+
+        /// <summary>
+        /// Extracts a zip archive entry with retries and exponential backoff to handle transient Windows file locks.
+        /// </summary>
+        public static void ExtractEntryWithRetry(ZipArchiveEntry entry, string destinationPath, int maxRetries = 5, int delayMs = 250)
+        {
+            if (maxRetries < 1)
+            {
+                throw new ArgumentOutOfRangeException("maxRetries", "maxRetries must be at least 1.");
+            }
+            if (delayMs < 0)
+            {
+                throw new ArgumentOutOfRangeException("delayMs", "delayMs must be non-negative.");
+            }
+
+            bool wasReadOnly = false;
+            if (File.Exists(destinationPath))
+            {
+                try
+                {
+                    var attrs = File.GetAttributes(destinationPath);
+                    wasReadOnly = (attrs & FileAttributes.ReadOnly) == FileAttributes.ReadOnly;
+                }
+                catch { }
+            }
+
+            try
+            {
+                for (int attempt = 1; attempt <= maxRetries; attempt++)
+                {
+                    string tempPath = destinationPath + ".tmp." + Guid.NewGuid().ToString("N");
+                    try
+                    {
+                        // 1. Extract entry to a temporary file in destination directory
+                        entry.ExtractToFile(tempPath, true);
+
+                        // 2. Clear ReadOnly attribute on destination if present
+                        if (File.Exists(destinationPath))
+                        {
+                            var attrs = File.GetAttributes(destinationPath);
+                            if ((attrs & FileAttributes.ReadOnly) == FileAttributes.ReadOnly)
+                            {
+                                File.SetAttributes(destinationPath, attrs & ~FileAttributes.ReadOnly);
+                            }
+                        }
+
+                        // 3. Atomically replace destination only after extraction completed successfully
+                        File.Copy(tempPath, destinationPath, true);
+
+                        // 4. Restore read-only attribute if applicable
+                        if (wasReadOnly)
+                        {
+                            File.SetAttributes(destinationPath, File.GetAttributes(destinationPath) | FileAttributes.ReadOnly);
+                        }
+                        return;
+                    }
+                    catch (UnauthorizedAccessException uex)
+                    {
+                        if (attempt == maxRetries)
+                        {
+                            throw new IOException(string.Format(
+                                "Cannot write to file '{0}' due to access permissions or read-only attribute. Details: {1}",
+                                Path.GetFileName(destinationPath),
+                                uex.Message
+                            ), uex);
+                        }
+                        int sleepDuration = (int)Math.Min((long)delayMs * attempt, (long)int.MaxValue);
+                        Thread.Sleep(sleepDuration);
+                    }
+                    catch (IOException ex)
+                    {
+                        int win32ErrorCode = System.Runtime.InteropServices.Marshal.GetHRForException(ex) & 0xFFFF;
+                        if (win32ErrorCode != 32 && win32ErrorCode != 33)
+                        {
+                            throw;
+                        }
+
+                        if (attempt == maxRetries)
+                        {
+                            throw new IOException(string.Format(
+                                "Cannot access file '{0}' because it is in use by another process. Please ensure all AgriVisio instances are closed and antivirus is not locking the file.\n\nDetails: {1}",
+                                Path.GetFileName(destinationPath),
+                                ex.Message
+                            ), ex);
+                        }
+                        int sleepDuration = (int)Math.Min((long)delayMs * attempt, (long)int.MaxValue);
+                        Thread.Sleep(sleepDuration);
+                    }
+                    finally
+                    {
+                        if (File.Exists(tempPath))
+                        {
+                            try { File.Delete(tempPath); } catch { }
+                        }
+                    }
+                }
+        }
+        finally
+        {
+            if (wasReadOnly && File.Exists(destinationPath))
+            {
+                try
+                {
+                    File.SetAttributes(destinationPath, File.GetAttributes(destinationPath) | FileAttributes.ReadOnly);
+                }
+                catch { }
+            }
+        }
         }
 
         private void BtnInstall_Click(object sender, EventArgs e)
@@ -393,7 +878,21 @@ namespace AgriVisioSetup
                     {
                         lblStatus.Text = "Checking for existing AgriVisio instances...";
                     });
-                    CloseExistingAgriVisioProcesses(targetDir);
+
+                    if (!EnsureProcessesClosed(targetDir))
+                    {
+                        this.Invoke((MethodInvoker)delegate
+                        {
+                            lblStatus.Text = "Installation canceled: existing processes could not be closed.";
+                            lblStatus.ForeColor = Color.FromArgb(239, 68, 68);
+                            btnInstall.Enabled = true;
+                            txtInstallPath.Enabled = true;
+                            chkDesktopShortcut.Enabled = true;
+                            chkLaunchNow.Enabled = true;
+                            progressBar.Visible = false;
+                        });
+                        return;
+                    }
                     Thread.Sleep(300);
 
                     this.Invoke((MethodInvoker)delegate
@@ -468,6 +967,22 @@ namespace AgriVisioSetup
                         using (MemoryStream ms = new MemoryStream(payloadBytes))
                         using (ZipArchive archive = new ZipArchive(ms, ZipArchiveMode.Read))
                         {
+                            // Re-check for running AgriVisio processes immediately before the first file write
+                            if (!EnsureProcessesClosed(targetDir))
+                            {
+                                this.Invoke((MethodInvoker)delegate
+                                {
+                                    lblStatus.Text = "Installation canceled: existing processes could not be closed.";
+                                    lblStatus.ForeColor = Color.FromArgb(239, 68, 68);
+                                    btnInstall.Enabled = true;
+                                    txtInstallPath.Enabled = true;
+                                    chkDesktopShortcut.Enabled = true;
+                                    chkLaunchNow.Enabled = true;
+                                    progressBar.Visible = false;
+                                });
+                                return;
+                            }
+
                             int total = archive.Entries.Count;
                             int count = 0;
 
@@ -511,7 +1026,7 @@ namespace AgriVisioSetup
                                         ));
                                     }
 
-                                    entry.ExtractToFile(fullDestPath, true);
+                                    ExtractEntryWithRetry(entry, fullDestPath);
                                 }
 
                                 if (count % 100 == 0 || count == total)
@@ -571,6 +1086,36 @@ namespace AgriVisioSetup
                     if (ex is UnauthorizedAccessException)
                     {
                         errDetail = "Access denied while writing files to:\n" + targetDir + "\n\nThis may be caused by Windows Defender Controlled Folder Access (Ransomware Protection) or insufficient permissions. Try running as administrator or selecting a folder inside your user profile.";
+                    }
+                    else if (ex is IOException)
+                    {
+                        IOException ioEx = (IOException)ex;
+                        int win32ErrorCode = System.Runtime.InteropServices.Marshal.GetHRForException(ioEx) & 0xFFFF;
+                        if (ioEx.InnerException is IOException)
+                        {
+                            int innerCode = System.Runtime.InteropServices.Marshal.GetHRForException((IOException)ioEx.InnerException) & 0xFFFF;
+                            if (innerCode == 32 || innerCode == 33 || innerCode == 112)
+                            {
+                                win32ErrorCode = innerCode;
+                            }
+                        }
+
+                        if (win32ErrorCode == 32 || win32ErrorCode == 33)
+                        {
+                            errDetail = "File access or locking error during extraction:\n\n" + ex.Message + "\n\nPlease ensure AgriVisio and all background services are completely closed, and retry.";
+                        }
+                        else if (win32ErrorCode == 112)
+                        {
+                            errDetail = "Insufficient disk space on target drive during extraction:\n\n" + ex.Message + "\n\nPlease free up disk space on the installation drive and retry.";
+                        }
+                        else if (ex.InnerException is UnauthorizedAccessException)
+                        {
+                            errDetail = "Access denied while writing files to:\n" + targetDir + "\n\nThis may be caused by Windows Defender or insufficient permissions. Try running as administrator or selecting a folder inside your user profile.";
+                        }
+                        else
+                        {
+                            errDetail = "I/O error during extraction:\n\n" + ex.Message;
+                        }
                     }
                     this.Invoke((MethodInvoker)delegate
                     {
@@ -736,6 +1281,67 @@ namespace AgriVisioSetup
         [STAThread]
         public static void Main(string[] args)
         {
+#if TEST_HARNESS
+            if (args != null && args.Length > 0)
+            {
+                if (args[0] == "--test-extract-retry")
+                {
+                    if (args.Length < 6)
+                    {
+                        Console.Error.WriteLine("Usage: --test-extract-retry <zipPath> <entryName> <destPath> <maxRetries> <delayMs>");
+                        Environment.Exit(1);
+                        return;
+                    }
+                    try
+                    {
+                        string zipPath = args[1];
+                        string entryName = args[2];
+                        string destPath = args[3];
+                        int maxRetries = int.Parse(args[4]);
+                        int delayMs = int.Parse(args[5]);
+                        using (ZipArchive zip = ZipFile.OpenRead(zipPath))
+                        {
+                            ZipArchiveEntry entry = zip.GetEntry(entryName);
+                            if (entry == null)
+                            {
+                                Console.Error.WriteLine("Entry not found: " + entryName);
+                                Environment.Exit(2);
+                            }
+                            ExtractEntryWithRetry(entry, destPath, maxRetries, delayMs);
+                        }
+                        Environment.Exit(0);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.Error.WriteLine("ExtractEntryWithRetry failed: " + ex.Message);
+                        Environment.Exit(1);
+                    }
+                    return;
+                }
+                if (args[0] == "--test-get-procs")
+                {
+                    if (args.Length < 2)
+                    {
+                        Console.Error.WriteLine("Usage: --test-get-procs <targetDir>");
+                        Environment.Exit(1);
+                        return;
+                    }
+                    string targetDir = args[1];
+                    List<Process> procs = GetAgriVisioProcessesInDirectory(targetDir);
+                    foreach (Process p in procs)
+                    {
+                        try
+                        {
+                            Console.WriteLine(string.Format("{0}:{1}", p.Id, p.ProcessName));
+                        }
+                        catch { }
+                    }
+                    Environment.Exit(0);
+                    return;
+                }
+            }
+#endif
+
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             string initialPath = (args != null && args.Length > 0 && !string.IsNullOrWhiteSpace(args[0])) ? args[0].Trim('"', ' ') : null;

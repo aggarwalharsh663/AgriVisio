@@ -31,12 +31,38 @@ namespace AgriVisioLauncher
                 string electronExe = Path.Combine(electronDir, "dist", "electron.exe");
                 string mainScript = Path.Combine(electronDir, "main.cjs");
 
+                string installedDir = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "Programs",
+                    "AgriVisio"
+                );
+
+                if (!File.Exists(electronExe))
+                {
+                    // Fallback 1: LocalAppData Programs installation directory
+                    string localAppDir = Path.Combine(installedDir, "electron", "dist", "electron.exe");
+                    if (File.Exists(localAppDir))
+                    {
+                        electronExe = localAppDir;
+                        appDir = installedDir;
+                    }
+                }
+
+                if (!File.Exists(mainScript))
+                {
+                    string fallbackScript = Path.Combine(installedDir, "electron", "main.cjs");
+                    if (File.Exists(fallbackScript))
+                    {
+                        mainScript = fallbackScript;
+                    }
+                }
+
                 if (!File.Exists(electronExe))
                 {
                     MessageBox.Show(
                         "AgriVisio application files are incomplete.\n\n" +
-                        "Missing: " + electronExe + "\n\n" +
-                        "Please verify the installation directory.",
+                        "Missing: electron\\dist\\electron.exe\n\n" +
+                        "Please verify the installation directory or reinstall AgriVisio.",
                         "AgriVisio - Missing Component",
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Warning

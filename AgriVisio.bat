@@ -3,18 +3,26 @@ setlocal
 cd /d "%~dp0"
 
 echo [1/2] Checking components...
-if not exist "electron\dist\electron.exe" (
-    echo [Error] electron\dist\electron.exe is missing. Please extract the full zip package.
+set "ELECTRON_EXE=electron\dist\electron.exe"
+if not exist "%ELECTRON_EXE%" (
+    if exist "%LOCALAPPDATA%\Programs\AgriVisio\electron\dist\electron.exe" (
+        set "ELECTRON_EXE=%LOCALAPPDATA%\Programs\AgriVisio\electron\dist\electron.exe"
+    )
+)
+
+if not exist "%ELECTRON_EXE%" (
+    echo [Error] electron\dist\electron.exe is missing. Please extract the full package or reinstall AgriVisio.
     pause
     exit /b 1
 )
 
-if not exist "backend\python\python.exe" (
-    echo [Error] backend\python\python.exe is missing. Please extract the full zip package.
-    pause
-    exit /b 1
+set "PYTHON_EXE=backend\python\python.exe"
+if not exist "%PYTHON_EXE%" (
+    if exist "%LOCALAPPDATA%\Programs\AgriVisio\backend\python\python.exe" (
+        set "PYTHON_EXE=%LOCALAPPDATA%\Programs\AgriVisio\backend\python\python.exe"
+    )
 )
 
 echo [2/2] Launching AgriVisio Desktop...
-start "" "electron\dist\electron.exe" "%~dp0electron\main.cjs"
+start "" "%ELECTRON_EXE%" "%~dp0electron\main.cjs"
 exit /b 0

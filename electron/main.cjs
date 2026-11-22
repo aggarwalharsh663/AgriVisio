@@ -58,6 +58,9 @@ const candidatePythons = [
   path.join(ROOT_DIR, '.venv', 'Scripts', 'python.exe'),
   path.join(ROOT_DIR, '.venv', 'python.exe'),
   path.join(ROOT_DIR, 'python.exe'),
+  ...(process.env.LOCALAPPDATA
+    ? [path.join(process.env.LOCALAPPDATA, 'Programs', 'AgriVisio', 'backend', 'python', 'python.exe')]
+    : []),
 ];
 let PYTHON_EXE = candidatePythons.find((p) => fs.existsSync(p)) || 'python';
 const WORKER_SCRIPT = path.join(BACKEND_DIR, 'ipc_worker.py');
@@ -76,17 +79,24 @@ if (fs.existsSync(LOGO_PATH)) {
 const pendingRequests = new Map();
 let isWorkerReady = false;
 let workerReadyResolve = null;
+let workerReadyReject = null;
 let lastWorkerHeartbeat = Date.now();
-const workerReadyPromise = new Promise((resolve) => {
+let workerReadyPromise = new Promise((resolve, reject) => {
   workerReadyResolve = resolve;
+  workerReadyReject = reject;
 });
 
 function startPythonWorker() {
-  log('Spawning portless Python worker:', PYTHON_EXE, WORKER_SCRIPT);
+  if (pythonProcess && !pythonProcess.killed) {
+    log('Python worker process is already running (PID:', pythonProcess.pid, '); skipping duplicate spawn.');
+    return;
+  }
 
-  pythonProcess = spawn(
+  log('Spawning portless Python worker with parent watchdog PID:', process.pid, PYTHON_EXE, WORKER_SCRIPT);
+
+  const proc = spawn(
     PYTHON_EXE,
-    [WORKER_SCRIPT],
+    [WORKER_SCRIPT, '--parent-pid', String(process.pid)],
     {
       cwd: ROOT_DIR,
       windowsHide: true,
@@ -94,16 +104,21 @@ function startPythonWorker() {
       env: Object.assign({}, process.env, {
         PYTHONPATH: ROOT_DIR,
         PYTHONUNBUFFERED: '1',
+        AGRIVISIO_PARENT_PID: String(process.pid),
+        AGRIVISIO_IPC_MODE: '1',
       }),
     }
   );
+  pythonProcess = proc;
 
   const rl = readline.createInterface({
-    input: pythonProcess.stdout,
+    input: proc.stdout,
     crlfDelay: Infinity,
   });
 
   rl.on('line', (line) => {
+    // Guard against stale process output after respawn
+    if (pythonProcess !== proc) return;
     line = line.trim();
     if (!line) return;
     try {
@@ -125,22 +140,47 @@ function startPythonWorker() {
         } else {
           reject(new Error(msg.error || 'Worker request failed.'));
         }
+      } else if (!reqId && !msg.ok) {
+        // Log uncorresponded line error without destroying unrelated in-flight requests (CR-02)
+        log('Worker reported stream-level IPC error without ID:', msg.error);
       }
     } catch (e) {
-      log('Worker stdout parse error:', e.message, line);
+      log('Worker stdout parse error:', e.message);
     }
   });
 
-  pythonProcess.stderr.on('data', (data) => {
+  proc.stderr.on('data', (data) => {
     log('[Python stderr]', data.toString().trim());
   });
 
-  pythonProcess.on('error', (err) => {
+  proc.on('error', (err) => {
     log('Python process spawn error:', err);
+    // Guard against stale process events after respawn
+    if (pythonProcess !== proc) return;
+    if (workerReadyReject && !isWorkerReady) {
+      workerReadyReject(new Error('Python worker spawn error: ' + err.message));
+    }
+    pythonProcess = null;
+    isWorkerReady = false;
+    workerReadyPromise = new Promise((resolve, reject) => {
+      workerReadyResolve = resolve;
+      workerReadyReject = reject;
+    });
   });
 
-  pythonProcess.on('exit', (code, signal) => {
+  proc.on('exit', (code, signal) => {
     log(`Python process exited with code ${code}, signal ${signal}`);
+    // Guard against stale process events after respawn
+    if (pythonProcess !== proc) return;
+    if (workerReadyReject && !isWorkerReady) {
+      workerReadyReject(new Error(`Python worker exited before becoming ready (code ${code}, signal ${signal}).`));
+    }
+    pythonProcess = null;
+    isWorkerReady = false;
+    workerReadyPromise = new Promise((resolve, reject) => {
+      workerReadyResolve = resolve;
+      workerReadyReject = reject;
+    });
     for (const [id, { reject }] of pendingRequests.entries()) {
       reject(new Error('Python worker terminated unexpectedly.'));
     }
@@ -150,6 +190,18 @@ function startPythonWorker() {
 
 function sendIpcRequest(action, data = {}, timeoutMs = 60000) {
   return new Promise(async (resolve, reject) => {
+    if ((!pythonProcess || pythonProcess.killed) && !isQuitting) {
+      if (action === 'shutdown') {
+        return resolve({ status: 'already_stopped' });
+      }
+      log('Python worker is not running; attempting auto-respawn...');
+      try {
+        startPythonWorker();
+      } catch (spawnErr) {
+        return reject(new Error('Failed to auto-respawn Python worker: ' + spawnErr.message));
+      }
+    }
+
     if (!isWorkerReady) {
       try {
         await Promise.race([
@@ -184,15 +236,21 @@ function sendIpcRequest(action, data = {}, timeoutMs = 60000) {
 }
 
 let currentSessionToken = null;
+let authGeneration = 0;
 
 async function performElectronBootstrap() {
   const secret = crypto.randomBytes(32).toString('hex');
+  const genAtStart = authGeneration;
   try {
     log('Registering startup bootstrap secret via portless IPC...');
     await sendIpcRequest('register_bootstrap', { secret });
     log('Performing bootstrap exchange via portless IPC...');
     const result = await sendIpcRequest('bootstrap', { secret });
     if (result && result.session_token) {
+      if (authGeneration !== genAtStart) {
+        log('Session generation changed during bootstrap (e.g. user logged out); discarding stale token.');
+        return false;
+      }
       currentSessionToken = result.session_token;
       log('Bootstrap authenticated successfully. Local session established.');
       return true;
@@ -357,6 +415,7 @@ function registerProtocolHandler() {
       // 1c. API: /api/auth/logout (S-02)
       if (pathname === '/api/auth/logout' && req.method === 'POST') {
         currentSessionToken = null;
+        authGeneration++;
         return new Response(JSON.stringify({ status: 'logged_out' }), {
           headers: {
             'content-type': 'application/json',
@@ -368,6 +427,24 @@ function registerProtocolHandler() {
       // 1d. API: /api/auth/status (T-01)
       if (pathname === '/api/auth/status') {
         return new Response(JSON.stringify({ authenticated: Boolean(currentSessionToken) }), {
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+
+      // 1e. API: /api/auth/reauthenticate (Desktop session recovery)
+      if (pathname === '/api/auth/reauthenticate' && req.method === 'POST') {
+        const genAtStart = authGeneration;
+        const success = await performElectronBootstrap();
+        if (success && currentSessionToken && authGeneration === genAtStart) {
+          return new Response(JSON.stringify({ status: 'authenticated' }), {
+            headers: {
+              'content-type': 'application/json',
+              'set-cookie': `agrivisio_session=${currentSessionToken}; HttpOnly; SameSite=Lax; Path=/`,
+            },
+          });
+        }
+        return new Response(JSON.stringify({ detail: 'Desktop session re-authentication failed.' }), {
+          status: 401,
           headers: { 'content-type': 'application/json' },
         });
       }
@@ -395,6 +472,12 @@ function registerProtocolHandler() {
 
       // 4. API: /api/scan (Simulated optical scan)
       if (pathname === '/api/scan' && req.method === 'POST') {
+        if (!currentSessionToken) {
+          return new Response(JSON.stringify({ detail: 'Unauthorized: Desktop session expired or unauthenticated.' }), {
+            status: 401,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
         const body = await req.json().catch(() => ({}));
         const result = await sendIpcRequest('scan', body);
         return new Response(JSON.stringify(result), {
@@ -404,6 +487,12 @@ function registerProtocolHandler() {
 
       // 4b. API: /api/scan/hardware (Epson scanner capture)
       if (pathname === '/api/scan/hardware' && req.method === 'POST') {
+        if (!currentSessionToken) {
+          return new Response(JSON.stringify({ detail: 'Unauthorized: Desktop session expired or unauthenticated.' }), {
+            status: 401,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
         const body = await req.json().catch(() => ({}));
         try {
           const result = await sendIpcRequest('scan_hardware', body, 120000);
@@ -412,6 +501,15 @@ function registerProtocolHandler() {
           });
         } catch (err) {
           const msg = err.message || '';
+          if (msg.includes('unsupported') || msg.includes('Unsupported')) {
+            return new Response(JSON.stringify({
+              error: 'hardware_scan_unsupported',
+              detail: 'Direct hardware scanning is not supported on this platform or environment.',
+            }), {
+              status: 501,
+              headers: { 'content-type': 'application/json' },
+            });
+          }
           if (msg.includes('No scanner') || msg.includes('scanner not found') || msg.includes('no scanner')) {
             return new Response(JSON.stringify({
               error: 'scanner_not_found',
@@ -433,6 +531,12 @@ function registerProtocolHandler() {
 
       // 5. API: /api/scan/upload (Multipart photo upload)
       if (pathname === '/api/scan/upload' && req.method === 'POST') {
+        if (!currentSessionToken) {
+          return new Response(JSON.stringify({ detail: 'Unauthorized: Desktop session expired or unauthenticated.' }), {
+            status: 401,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
         const formData = await req.formData();
         const file = formData.get('image') || formData.get('file');
         if (!file) {
@@ -458,6 +562,41 @@ function registerProtocolHandler() {
           });
         }
 
+        function parseOptionalCalibrationFloat(value, paramName) {
+          if (value === null || value === undefined) return null;
+          const str = String(value).trim();
+          if (str === '' || str.toLowerCase() === 'null' || str.toLowerCase() === 'none' || str.toLowerCase() === 'undefined') {
+            return null;
+          }
+          const num = Number(str);
+          if (!Number.isFinite(num)) {
+            throw new Error(`${paramName} must be a valid numeric value.`);
+          }
+          if (num <= 0) {
+            throw new Error(`${paramName} must be greater than zero.`);
+          }
+          return num;
+        }
+
+        let calibMmPerPixel = null;
+        let refLengthMm = null;
+        let refPixels = null;
+
+        try {
+          calibMmPerPixel = parseOptionalCalibrationFloat(formData.get('calibration_mm_per_pixel'), 'calibration_mm_per_pixel');
+          refLengthMm = parseOptionalCalibrationFloat(formData.get('reference_length_mm'), 'reference_length_mm');
+          refPixels = parseOptionalCalibrationFloat(formData.get('reference_pixels'), 'reference_pixels');
+
+          if ((refLengthMm !== null && refPixels === null) || (refLengthMm === null && refPixels !== null)) {
+            throw new Error('Both reference_length_mm and reference_pixels must be provided together for physical reference calibration.');
+          }
+        } catch (valErr) {
+          return new Response(JSON.stringify({ detail: valErr.message, error: 'validation_error' }), {
+            status: 422,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+
         const ext = path.extname(file.name || 'uploaded.jpg').toLowerCase() || '.jpg';
         const tempName = `upload-${crypto.randomUUID()}${ext}`;
         const tempPath = path.join(TEMP_UPLOADS, tempName);
@@ -470,9 +609,19 @@ function registerProtocolHandler() {
             sample_name: formData.get('sample_name') || '',
             variety: formData.get('variety') || '',
             lighting: formData.get('lighting') || 'ring_light',
+            calibration_mm_per_pixel: calibMmPerPixel,
+            reference_length_mm: refLengthMm,
+            reference_pixels: refPixels,
           });
 
           return new Response(JSON.stringify(result), {
+            headers: { 'content-type': 'application/json' },
+          });
+        } catch (ipcErr) {
+          const errMsg = ipcErr.message || 'The uploaded photo could not be analyzed.';
+          const isValidation = errMsg.includes('must be') || errMsg.includes('required') || errMsg.includes('greater than zero') || errMsg.includes('valid');
+          return new Response(JSON.stringify({ detail: errMsg, error: isValidation ? 'validation_error' : 'scan_failed' }), {
+            status: isValidation ? 422 : 500,
             headers: { 'content-type': 'application/json' },
           });
         } finally {
@@ -484,7 +633,43 @@ function registerProtocolHandler() {
 
       // 6. API: /api/batches
       if (pathname === '/api/batches' && req.method === 'GET') {
-        const result = await sendIpcRequest('list_batches', {});
+        if (!currentSessionToken) {
+          return new Response(JSON.stringify({ detail: 'Unauthorized: Desktop session expired or unauthenticated.' }), {
+            status: 401,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        const pageParam = parsedUrl.searchParams.get('page');
+        const pageSizeParam = parsedUrl.searchParams.get('page_size');
+
+        let page = null;
+        if (pageParam !== null) {
+          const parsed = Number(pageParam);
+          if (!Number.isInteger(parsed) || parsed < 1) {
+            return new Response(JSON.stringify({ detail: 'Invalid page parameter: must be an integer >= 1' }), {
+              status: 422,
+              headers: { 'content-type': 'application/json' },
+            });
+          }
+          page = parsed;
+        }
+
+        let pageSize = null;
+        if (pageSizeParam !== null) {
+          const parsed = Number(pageSizeParam);
+          if (!Number.isInteger(parsed) || parsed < 1 || parsed > 100) {
+            return new Response(JSON.stringify({ detail: 'Invalid page_size parameter: must be between 1 and 100' }), {
+              status: 422,
+              headers: { 'content-type': 'application/json' },
+            });
+          }
+          pageSize = parsed;
+        }
+
+        const result = await sendIpcRequest('list_batches', {
+          page,
+          page_size: pageSize,
+        });
         return new Response(JSON.stringify(result), {
           headers: { 'content-type': 'application/json' },
         });
@@ -493,11 +678,85 @@ function registerProtocolHandler() {
       // 7. API: /api/batches/:batch_id
       const batchMatch = pathname.match(/^\/api\/batches\/([^/]+)$/);
       if (batchMatch && req.method === 'GET') {
+        if (!currentSessionToken) {
+          return new Response(JSON.stringify({ detail: 'Unauthorized: Desktop session expired or unauthenticated.' }), {
+            status: 401,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
         const batchId = decodeURIComponent(batchMatch[1]);
-        const result = await sendIpcRequest('get_batch', { batch_id: batchId });
-        return new Response(JSON.stringify(result), {
-          headers: { 'content-type': 'application/json' },
-        });
+        try {
+          const result = await sendIpcRequest('get_batch', { batch_id: batchId });
+          if (!result) {
+            return new Response(JSON.stringify({ detail: 'Batch not found' }), {
+              status: 404,
+              headers: { 'content-type': 'application/json' },
+            });
+          }
+          return new Response(JSON.stringify(result), {
+            headers: { 'content-type': 'application/json' },
+          });
+        } catch (err) {
+          const errMsg = err && err.message ? err.message : String(err);
+          if (/not found/i.test(errMsg) || /404/.test(errMsg)) {
+            return new Response(JSON.stringify({ detail: 'Batch not found' }), {
+              status: 404,
+              headers: { 'content-type': 'application/json' },
+            });
+          }
+          log('[get_batch IPC Error]', errMsg);
+          return new Response(JSON.stringify({ detail: errMsg, error: 'ipc_error' }), {
+            status: 500,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+      }
+
+      // 7b. API: /api/batches/:batch_id/export (JSON report export)
+      const exportMatch = pathname.match(/^\/api\/batches\/([^/]+)\/export$/);
+      if (exportMatch && req.method === 'GET') {
+        if (!currentSessionToken) {
+          return new Response(JSON.stringify({ detail: 'Unauthorized: Desktop session expired or unauthenticated.' }), {
+            status: 401,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        const batchId = decodeURIComponent(exportMatch[1]);
+        try {
+          const result = await sendIpcRequest('get_batch', { batch_id: batchId });
+          if (!result) {
+            return new Response(JSON.stringify({ detail: 'Batch not found' }), {
+              status: 404,
+              headers: { 'content-type': 'application/json' },
+            });
+          }
+          if (result.is_mock) {
+            return new Response(JSON.stringify({ detail: 'Mock batches cannot be exported as genuine grading certificates or measurement reports.' }), {
+              status: 400,
+              headers: { 'content-type': 'application/json' },
+            });
+          }
+          const safeBatchId = batchId.replace(/[^a-zA-Z0-9_-]/g, '');
+          return new Response(JSON.stringify(result, null, 2), {
+            headers: {
+              'content-type': 'application/json',
+              'content-disposition': `attachment; filename="AgriVisio-Report-${safeBatchId}.json"`,
+            },
+          });
+        } catch (err) {
+          const errMsg = err && err.message ? err.message : String(err);
+          if (/not found/i.test(errMsg) || /404/.test(errMsg)) {
+            return new Response(JSON.stringify({ detail: 'Batch not found' }), {
+              status: 404,
+              headers: { 'content-type': 'application/json' },
+            });
+          }
+          log('[export IPC Error]', errMsg);
+          return new Response(JSON.stringify({ detail: errMsg, error: 'ipc_error' }), {
+            status: 500,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
       }
 
       // 8. Static uploaded media & batch files (/files/...) - hardened with auth, extension whitelist and batch scoping
@@ -507,8 +766,8 @@ function registerProtocolHandler() {
         }
         const rawRel = pathname.slice('/files/'.length);
         const normRel = rawRel.replace(/^[\/\\]+/, '');
-        // Require batch directory scoping (batches/<batch_id>/... or AS-.../...)
-        if (!normRel.startsWith('batches/') && !/^AS-[\w-]+\//.test(normRel)) {
+        // Require batch directory scoping (batches/<batch_id>/... or AV-.../... / AS-.../...)
+        if (!normRel.startsWith('batches/') && !/^(AV|AS)-[\w-]+\//.test(normRel)) {
           return new Response('Access Denied: Unscoped batch file access', { status: 403 });
         }
         const ext = path.extname(normRel).toLowerCase();
@@ -531,7 +790,9 @@ function registerProtocolHandler() {
           return new Response(fileData, {
             headers: {
               'content-type': contentType,
-              'cache-control': 'public, max-age=31536000, immutable',
+              'cache-control': 'private, max-age=86400',
+              'x-content-type-options': 'nosniff',
+              'x-frame-options': 'DENY',
             },
           });
         }
@@ -802,48 +1063,85 @@ ipcMain.handle('save-report-pdf', async (event, { batchId }) => {
   }
 });
 
+// IPC handler for renderer desktop session re-authentication
+ipcMain.handle('reauthenticate', async () => {
+  log('Desktop session recovery requested from renderer...');
+  const genAtStart = authGeneration;
+  const success = await performElectronBootstrap();
+  if (success && currentSessionToken && authGeneration === genAtStart) {
+    log('Desktop session recovery successful.');
+    return { success: true };
+  }
+  log('Desktop session recovery failed or cancelled.');
+  return { success: false, error: 'Failed to re-authenticate with the optical engine.' };
+});
+
+let stopBackendPromise = null;
+let hasStoppedBackend = false;
+
 function stopBackend(callback) {
-  if (!pythonProcess) {
+  if (hasStoppedBackend) {
     if (callback) callback();
     return;
   }
-  const proc = pythonProcess;
-  pythonProcess = null;
 
-  try {
-    log('Initiating graceful shutdown of Python worker...');
-    if (proc.stdin && !proc.stdin.destroyed) {
-      try {
-        proc.stdin.write(JSON.stringify({ action: 'shutdown' }) + '\n');
-        proc.stdin.end();
-      } catch (e) {}
-    }
-
-    let exited = false;
-    const forceKillTimer = setTimeout(() => {
-      if (!exited) {
-        log('Graceful shutdown timeout (3000ms) expired; terminating process forcibly.');
-        try {
-          if (process.platform === 'win32' && proc.pid) {
-            spawn('taskkill', ['/pid', String(proc.pid), '/T', '/F'], { windowsHide: true });
-          } else {
-            proc.kill('SIGKILL');
-          }
-        } catch (e) {}
+  if (!stopBackendPromise) {
+    stopBackendPromise = new Promise((resolve) => {
+      const proc = pythonProcess;
+      if (!proc || proc.killed) {
+        pythonProcess = null;
+        hasStoppedBackend = true;
+        resolve();
+        return;
       }
-      if (callback) callback();
-    }, 3000);
+      pythonProcess = null;
 
-    proc.once('exit', (code, signal) => {
-      exited = true;
-      clearTimeout(forceKillTimer);
-      log(`Python worker exited cleanly (code: ${code}, signal: ${signal}).`);
-      if (callback) callback();
+      try {
+        log('Initiating graceful shutdown of Python worker...');
+        if (proc.stdin && !proc.stdin.destroyed) {
+          try {
+            proc.stdin.write(JSON.stringify({ action: 'shutdown' }) + '\n');
+            proc.stdin.end();
+          } catch (e) {}
+        }
+
+        let finished = false;
+        const done = () => {
+          if (!finished) {
+            finished = true;
+            clearTimeout(forceKillTimer);
+            hasStoppedBackend = true;
+            resolve();
+          }
+        };
+
+        const forceKillTimer = setTimeout(() => {
+          log('Graceful shutdown timeout (3000ms) expired; terminating process forcibly.');
+          try {
+            if (process.platform === 'win32' && proc.pid) {
+              spawn('taskkill', ['/pid', String(proc.pid), '/T', '/F'], { windowsHide: true });
+            } else {
+              proc.kill('SIGKILL');
+            }
+          } catch (e) {}
+          done();
+        }, 3000);
+
+        proc.once('exit', (code, signal) => {
+          log(`Python worker exited cleanly (code: ${code}, signal: ${signal}).`);
+          done();
+        });
+      } catch (err) {
+        log('Error during stopBackend:', err);
+        hasStoppedBackend = true;
+        resolve();
+      }
     });
-  } catch (err) {
-    log('Error during stopBackend:', err);
-    if (callback) callback();
   }
+
+  stopBackendPromise.then(() => {
+    if (callback) callback();
+  });
 }
 
 app.whenReady().then(async () => {
@@ -875,15 +1173,25 @@ app.whenReady().then(async () => {
   });
 });
 
-app.on('window-all-closed', () => {
-  isQuitting = true;
-  stopBackend();
-  if (process.platform !== 'darwin') {
-    app.quit();
+app.on('before-quit', (e) => {
+  if (!hasStoppedBackend) {
+    e.preventDefault();
+    isQuitting = true;
+    stopBackend(() => {
+      app.quit();
+    });
   }
 });
 
-app.on('before-quit', () => {
+app.on('window-all-closed', () => {
   isQuitting = true;
-  stopBackend();
+  if (process.platform !== 'darwin') {
+    if (!hasStoppedBackend) {
+      stopBackend(() => {
+        app.quit();
+      });
+    } else {
+      app.quit();
+    }
+  }
 });
