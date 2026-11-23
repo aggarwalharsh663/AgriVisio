@@ -969,6 +969,10 @@ function createSplash() {
   splashWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(splashHtml));
 }
 
+let isAuthReady = false;
+let isMainWindowReady = false;
+let showMainWindow = () => {};
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1480,
@@ -996,8 +1000,12 @@ function createWindow() {
   mainWindow.loadURL('app://agrivisio/index.html');
 
   let mainWindowShown = false;
-  const showMainWindow = () => {
+  showMainWindow = () => {
     if (mainWindowShown) return;
+    if (!isAuthReady) {
+      log('showMainWindow deferred: optical engine bootstrap still in progress.');
+      return;
+    }
     mainWindowShown = true;
     log('showMainWindow invoked. splashWindow exists:', !!splashWindow, 'mainWindow exists:', !!mainWindow);
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -1014,7 +1022,10 @@ function createWindow() {
 
   mainWindow.once('ready-to-show', () => {
     log('mainWindow ready-to-show event fired.');
-    showMainWindow();
+    isMainWindowReady = true;
+    if (isAuthReady) {
+      showMainWindow();
+    }
   });
   mainWindow.webContents.on('did-fail-load', (e, code, desc, url) => {
     log(`mainWindow webContents did-fail-load: code ${code}, desc "${desc}", url: ${url}`);
@@ -1023,8 +1034,11 @@ function createWindow() {
     log('mainWindow render-process-gone:', JSON.stringify(details));
   });
   setTimeout(() => {
-    log('Fallback timeout 2500ms reached; invoking showMainWindow.');
-    showMainWindow();
+    log('Fallback timeout 2500ms reached; invoking showMainWindow if ready.');
+    isMainWindowReady = true;
+    if (isAuthReady) {
+      showMainWindow();
+    }
   }, 2500);
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -1192,6 +1206,7 @@ app.whenReady().then(async () => {
   registerProtocolHandler();
   createSplash();
   startPythonWorker();
+  createWindow(); // Concurrently pre-renders DOM, CSS, JS, and fonts in background
 
   const authSuccess = await performElectronBootstrap();
   if (!authSuccess) {
@@ -1204,7 +1219,11 @@ app.whenReady().then(async () => {
     return;
   }
 
-  createWindow();
+  isAuthReady = true;
+  log(`Authentication handshake complete. isMainWindowReady: ${isMainWindowReady}`);
+  if (isMainWindowReady) {
+    showMainWindow();
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

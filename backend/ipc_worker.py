@@ -729,7 +729,8 @@ def run_worker_loop(
 def main():
     os.environ["AGRIVISIO_IPC_MODE"] = "1"
     try:
-        _load_model()
+        # Pre-warm classifier model asynchronously in background so worker signals readiness immediately
+        threading.Thread(target=_load_model, daemon=True, name="model-preloader").start()
     except Exception as exc:
         LOGGER.warning("Could not pre-load classifier model: %s", exc)
 
