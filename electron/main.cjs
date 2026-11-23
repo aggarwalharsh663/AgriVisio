@@ -973,19 +973,37 @@ function createWindow() {
   // Zero-port local application loading
   mainWindow.loadURL('app://agrivisio/index.html');
 
+  let mainWindowShown = false;
   const showMainWindow = () => {
-    if (splashWindow && !splashWindow.isDestroyed()) {
-      splashWindow.close();
-      splashWindow = null;
-    }
+    if (mainWindowShown) return;
+    mainWindowShown = true;
+    log('showMainWindow invoked. splashWindow exists:', !!splashWindow, 'mainWindow exists:', !!mainWindow);
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.show();
       mainWindow.focus();
+      log('mainWindow.show() called successfully.');
+    }
+    if (splashWindow && !splashWindow.isDestroyed()) {
+      splashWindow.close();
+      splashWindow = null;
+      log('splashWindow.close() called.');
     }
   };
 
-  mainWindow.once('ready-to-show', showMainWindow);
-  setTimeout(showMainWindow, 2500);
+  mainWindow.once('ready-to-show', () => {
+    log('mainWindow ready-to-show event fired.');
+    showMainWindow();
+  });
+  mainWindow.webContents.on('did-fail-load', (e, code, desc, url) => {
+    log(`mainWindow webContents did-fail-load: code ${code}, desc "${desc}", url: ${url}`);
+  });
+  mainWindow.webContents.on('render-process-gone', (e, details) => {
+    log('mainWindow render-process-gone:', JSON.stringify(details));
+  });
+  setTimeout(() => {
+    log('Fallback timeout 2500ms reached; invoking showMainWindow.');
+    showMainWindow();
+  }, 2500);
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('http://') || url.startsWith('https://')) {
@@ -1174,6 +1192,7 @@ app.whenReady().then(async () => {
 });
 
 app.on('before-quit', (e) => {
+  log('app before-quit event received. hasStoppedBackend:', hasStoppedBackend);
   if (!hasStoppedBackend) {
     e.preventDefault();
     isQuitting = true;
@@ -1184,6 +1203,11 @@ app.on('before-quit', (e) => {
 });
 
 app.on('window-all-closed', () => {
+  log('app window-all-closed event received. Total windows:', BrowserWindow.getAllWindows().length);
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    log('Ignoring window-all-closed because mainWindow is still active.');
+    return;
+  }
   isQuitting = true;
   if (process.platform !== 'darwin') {
     if (!hasStoppedBackend) {
