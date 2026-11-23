@@ -52,6 +52,28 @@ if (!fs.existsSync(TEMP_UPLOADS)) {
   try { fs.mkdirSync(TEMP_UPLOADS, { recursive: true }); } catch (e) {}
 }
 
+function cleanupStaleTempUploads() {
+  try {
+    if (!fs.existsSync(TEMP_UPLOADS)) return;
+    const entries = fs.readdirSync(TEMP_UPLOADS);
+    const now = Date.now();
+    const MAX_AGE_MS = 15 * 60 * 1000; // 15 minutes max age for temporary upload files
+    for (const entry of entries) {
+      const fullPath = path.join(TEMP_UPLOADS, entry);
+      try {
+        const stats = fs.statSync(fullPath);
+        if (stats.isFile() && (now - stats.mtimeMs > MAX_AGE_MS)) {
+          fs.unlinkSync(fullPath);
+          log(`[Cleanup] Removed stale temp upload file: ${entry}`);
+        }
+      } catch (e) {}
+    }
+  } catch (e) {}
+}
+
+cleanupStaleTempUploads();
+setInterval(cleanupStaleTempUploads, 15 * 60 * 1000).unref();
+
 const candidatePythons = [
   path.join(BACKEND_DIR, 'python', 'python.exe'),
   path.join(ROOT_DIR, 'python', 'python.exe'),
