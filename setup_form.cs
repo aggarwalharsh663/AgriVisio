@@ -39,7 +39,7 @@ namespace AgriVisioSetup
 
         // Configurable expected SHA-256 checksum for agrivisio_payload.zip
         // If empty or null, integrity verification uses embedded manifest or validates stream readable
-        public static string ExpectedPayloadSha256 = "F93CB97AB2B084CCFAC62416A9C8C2F188F8D6D41030F6AD6BC892A5F24F0C56";
+        public static string ExpectedPayloadSha256 = "953AE99306DBF41F56BB765B67DE00188CEE60D052450738291E1D408E13D5A9";
 
                 /// <summary>
         /// Constant-time comparison of two hex hash strings to prevent timing side-channels (S-03).

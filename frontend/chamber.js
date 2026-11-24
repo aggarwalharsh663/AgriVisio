@@ -234,7 +234,7 @@
   }
 
   function drawTopPanel(box) {
-    const opening = { left: -0.72, right: 0.72, back: -1.02, front: 1.02 };
+    const opening = { left: -0.66, right: 0.66, back: -1.21, front: 0.98 };
     const outline = [
       [box.left, box.top, box.back],
       [box.right, box.top, box.back],
@@ -265,11 +265,11 @@
 
     drawLine(cutout.concat([cutout[0]]), "#59665e", 5);
     drawLine(
-      [[opening.left + 0.08, box.top, opening.back + 0.08],
-        [opening.right - 0.08, box.top, opening.back + 0.08],
-        [opening.right - 0.08, box.top, opening.front - 0.08],
-        [opening.left + 0.08, box.top, opening.front - 0.08],
-        [opening.left + 0.08, box.top, opening.back + 0.08]],
+      [[opening.left + 0.05, box.top, opening.back + 0.05],
+        [opening.right - 0.05, box.top, opening.back + 0.05],
+        [opening.right - 0.05, box.top, opening.front - 0.05],
+        [opening.left + 0.05, box.top, opening.front - 0.05],
+        [opening.left + 0.05, box.top, opening.back + 0.05]],
       "#e2e8e3",
       2,
     );
@@ -324,6 +324,7 @@
   }
 
   function drawAppleLogo(cx, cz, y) {
+    if (Math.abs(Math.sin(pitch)) < 0.08) return;
     const xform = getSurfaceTransform(cx, y, cz);
     context.save();
     context.transform(xform.vx.x, xform.vx.y, xform.vz.x, xform.vz.y, xform.p0.x, xform.p0.y);
@@ -342,6 +343,9 @@
     if (appleLogoPath) {
       context.fillStyle = logoGrad;
       context.fill(appleLogoPath);
+      context.strokeStyle = "rgba(255, 255, 255, 0.4)";
+      context.lineWidth = 1.2;
+      context.stroke(appleLogoPath);
     } else {
       context.beginPath();
       context.arc(84.1, 90.8, 55, 0, Math.PI * 2);
@@ -352,11 +356,12 @@
   }
 
   function drawIPhoneMarking(text, cx, cz, y, size) {
+    if (Math.abs(Math.sin(pitch)) < 0.08) return;
     const xform = getSurfaceTransform(cx, y, cz);
     context.save();
     context.transform(xform.vx.x, xform.vx.y, xform.vz.x, xform.vz.y, xform.p0.x, xform.p0.y);
     context.scale(0.007, 0.007);
-    context.fillStyle = "rgba(226, 232, 240, 0.35)";
+    context.fillStyle = "rgba(226, 232, 240, 0.45)";
     context.font = "bold " + (size || 14) + "px -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif";
     context.textAlign = "center";
     context.textBaseline = "middle";
@@ -364,10 +369,12 @@
     context.restore();
   }
 
-  function drawRealisticLens(cx, cz, baseY, outerRadius, lensHeight, lensType) {
+  function drawRealisticLens(cx, cz, baseY, outerRadius, lensHeight, lensType, facingDown) {
     const segments = 32;
+    const dir = facingDown ? -1 : 1;
     const topY = baseY + lensHeight;
-    const glassY = topY - 0.002;
+    const baffleY = topY - 0.003 * dir;
+    const glassY = topY - 0.006 * dir;
 
     const baseCircle = [];
     const topCircle = [];
@@ -388,21 +395,27 @@
       if (viewDir < -0.15) continue;
 
       const lightDot = nx * Math.cos(0.85 + yaw) + nz * Math.sin(0.85 + yaw);
-      const intensity = Math.round(105 + lightDot * 60);
-      const facetColor = "rgb(" + intensity + ", " + (intensity + 5) + ", " + (intensity + 11) + ")";
-      drawPolygon([topCircle[i], topCircle[next], baseCircle[next], baseCircle[i]], facetColor);
+      const intensity = Math.round(115 + lightDot * 65);
+      const facetColor = "rgb(" + intensity + ", " + (intensity + 6) + ", " + (intensity + 14) + ")";
+      drawPolygon(
+        facingDown
+          ? [baseCircle[i], baseCircle[next], topCircle[next], topCircle[i]]
+          : [topCircle[i], topCircle[next], baseCircle[next], baseCircle[i]],
+        facetColor
+      );
     }
 
     drawPolygon(topCircle, "#94a3b8", "#cbd5e1");
-    drawLine(topCircle.concat([topCircle[0]]), "#f1f5f9", 1.2);
+    drawLine(topCircle.concat([topCircle[0]]), "#f8fafc", 1.4);
 
-    const innerRadius = outerRadius * 0.80;
-    const innerCircle = [];
+    const innerRadius = outerRadius * 0.82;
+    const baffleCircle = [];
     for (let step = 0; step < segments; step += 1) {
       const angle = (step / segments) * Math.PI * 2;
-      innerCircle.push([cx + Math.cos(angle) * innerRadius, topY - 0.001, cz + Math.sin(angle) * innerRadius]);
+      baffleCircle.push([cx + Math.cos(angle) * innerRadius, baffleY, cz + Math.sin(angle) * innerRadius]);
     }
-    drawPolygon(innerCircle, "#090d16", "#1e293b");
+    drawPolygon(baffleCircle, "#0b0f17", "#1e293b");
+    drawLine(baffleCircle.concat([baffleCircle[0]]), "#334155", 0.8);
 
     const glassRadius = innerRadius * 0.88;
     const glassCircle = [];
@@ -410,7 +423,7 @@
       const angle = (step / segments) * Math.PI * 2;
       glassCircle.push([cx + Math.cos(angle) * glassRadius, glassY, cz + Math.sin(angle) * glassRadius]);
     }
-    drawPolygon(glassCircle, "#020617");
+    drawPolygon(glassCircle, "#020408");
 
     const screenCenter = project(cx, glassY, cz);
     const screenRadius = outerRadius * 78;
@@ -430,26 +443,26 @@
       screenCenter.x + screenRadius,
       screenCenter.y + screenRadius
     );
-    flare.addColorStop(0, "rgba(6, 182, 212, 0.65)");
-    flare.addColorStop(0.35, "rgba(16, 185, 129, 0.45)");
-    flare.addColorStop(0.68, "rgba(99, 102, 241, 0.25)");
+    flare.addColorStop(0, "rgba(6, 182, 212, 0.70)");
+    flare.addColorStop(0.32, "rgba(16, 185, 129, 0.55)");
+    flare.addColorStop(0.65, "rgba(99, 102, 241, 0.35)");
     flare.addColorStop(1, "rgba(2, 6, 23, 0.96)");
     context.fillStyle = flare;
     context.fill();
 
     if (lensType === "telephoto") {
-      const prismHalf = screenRadius * 0.28;
+      const prismHalf = screenRadius * 0.30;
       context.fillStyle = "#010204";
       context.fillRect(screenCenter.x - prismHalf, screenCenter.y - prismHalf, prismHalf * 2, prismHalf * 2);
-      context.strokeStyle = "rgba(148, 163, 184, 0.3)";
+      context.strokeStyle = "rgba(148, 163, 184, 0.45)";
       context.lineWidth = 1;
       context.strokeRect(screenCenter.x - prismHalf, screenCenter.y - prismHalf, prismHalf * 2, prismHalf * 2);
     } else if (lensType === "ultrawide") {
       context.beginPath();
-      context.arc(screenCenter.x, screenCenter.y, screenRadius * 0.44, 0, Math.PI * 2);
+      context.arc(screenCenter.x, screenCenter.y, screenRadius * 0.45, 0, Math.PI * 2);
       context.fillStyle = "#020408";
       context.fill();
-      context.strokeStyle = "rgba(56, 189, 248, 0.35)";
+      context.strokeStyle = "rgba(56, 189, 248, 0.5)";
       context.lineWidth = 1.2;
       context.stroke();
     } else {
@@ -457,16 +470,16 @@
       context.arc(screenCenter.x, screenCenter.y, screenRadius * 0.42, 0, Math.PI * 2);
       context.fillStyle = "#010307";
       context.fill();
-      context.strokeStyle = "rgba(16, 185, 129, 0.35)";
+      context.strokeStyle = "rgba(16, 185, 129, 0.5)";
       context.lineWidth = 1.2;
       context.stroke();
     }
 
     context.beginPath();
     context.arc(
-      screenCenter.x - screenRadius * 0.32,
-      screenCenter.y - screenRadius * 0.32,
-      Math.max(2, screenRadius * 0.12),
+      screenCenter.x - screenRadius * 0.30,
+      screenCenter.y - screenRadius * 0.30,
+      Math.max(2.2, screenRadius * 0.13),
       0,
       Math.PI * 2
     );
@@ -477,7 +490,7 @@
     context.arc(
       screenCenter.x + screenRadius * 0.24,
       screenCenter.y + screenRadius * 0.24,
-      Math.max(1.2, screenRadius * 0.07),
+      Math.max(1.4, screenRadius * 0.08),
       0,
       Math.PI * 2
     );
@@ -487,20 +500,39 @@
     context.restore();
   }
 
-  function drawTrueToneFlash(cx, cz, islandY) {
-    const flashRadius = 0.046;
+  function drawTrueToneFlash(cx, cz, islandY, facingDown) {
+    const flashRadius = 0.050;
+    const dir = facingDown ? -1 : 1;
+    const flashY = islandY + 0.006 * dir;
     const outerPts = [];
     for (let s = 0; s < 24; s += 1) {
       const a = (s / 24) * Math.PI * 2;
-      outerPts.push([cx + Math.cos(a) * flashRadius, islandY + 0.005, cz + Math.sin(a) * flashRadius]);
+      outerPts.push([cx + Math.cos(a) * flashRadius, flashY, cz + Math.sin(a) * flashRadius]);
     }
-    drawPolygon(outerPts, "#334155", "#64748b");
+    drawPolygon(outerPts, "#334155", "#94a3b8");
+    drawLine(outerPts.concat([outerPts[0]]), "#cbd5e1", 1);
 
     const innerRadius = flashRadius * 0.82;
-    const screenCenter = project(cx, islandY + 0.006, cz);
+    const innerPts = [];
+    for (let s = 0; s < 24; s += 1) {
+      const a = (s / 24) * Math.PI * 2;
+      innerPts.push([cx + Math.cos(a) * innerRadius, flashY + 0.002 * dir, cz + Math.sin(a) * innerRadius]);
+    }
+    drawPolygon(innerPts, "#1e293b");
+
+    const screenCenter = project(cx, flashY + 0.003 * dir, cz);
     const screenRad = innerRadius * 78;
 
     context.save();
+    context.beginPath();
+    innerPts.forEach(function (pt, idx) {
+      const sp = project(pt[0], pt[1], pt[2]);
+      if (idx === 0) context.moveTo(sp.x, sp.y);
+      else context.lineTo(sp.x, sp.y);
+    });
+    context.closePath();
+    context.clip();
+
     context.beginPath();
     context.arc(screenCenter.x, screenCenter.y, screenRad, Math.PI, 0);
     context.closePath();
@@ -515,45 +547,48 @@
 
     context.beginPath();
     context.arc(screenCenter.x, screenCenter.y, screenRad * 0.5, 0, Math.PI * 2);
-    context.strokeStyle = "rgba(255, 255, 255, 0.7)";
+    context.strokeStyle = "rgba(255, 255, 255, 0.75)";
     context.lineWidth = 1;
     context.stroke();
 
     context.beginPath();
-    context.arc(screenCenter.x, screenCenter.y, Math.max(1.2, screenRad * 0.2), 0, Math.PI * 2);
+    context.arc(screenCenter.x, screenCenter.y, Math.max(1.5, screenRad * 0.22), 0, Math.PI * 2);
     context.fillStyle = "#0f172a";
     context.fill();
     context.restore();
   }
 
-  function drawLidarScanner(cx, cz, islandY) {
-    const lidarRadius = 0.042;
+  function drawLidarScanner(cx, cz, islandY, facingDown) {
+    const lidarRadius = 0.046;
+    const dir = facingDown ? -1 : 1;
+    const lidarY = islandY + 0.005 * dir;
     const lidarPts = [];
-    for (let s = 0; s < 20; s += 1) {
-      const a = (s / 20) * Math.PI * 2;
-      lidarPts.push([cx + Math.cos(a) * lidarRadius, islandY + 0.004, cz + Math.sin(a) * lidarRadius]);
+    for (let s = 0; s < 24; s += 1) {
+      const a = (s / 24) * Math.PI * 2;
+      lidarPts.push([cx + Math.cos(a) * lidarRadius, lidarY, cz + Math.sin(a) * lidarRadius]);
     }
     drawPolygon(lidarPts, "#030712", "#1e1b4b");
-    const screenCenter = project(cx, islandY + 0.005, cz);
-    const screenRad = lidarRadius * 78;
+    drawLine(lidarPts.concat([lidarPts[0]]), "#475569", 1);
 
-    context.save();
-    context.beginPath();
-    context.arc(screenCenter.x, screenCenter.y, screenRad * 0.7, 0, Math.PI * 2);
-    context.strokeStyle = "rgba(139, 92, 246, 0.35)";
-    context.lineWidth = 1.2;
-    context.stroke();
-    context.restore();
+    const innerRadius = lidarRadius * 0.82;
+    const innerPts = [];
+    for (let s = 0; s < 20; s += 1) {
+      const a = (s / 20) * Math.PI * 2;
+      innerPts.push([cx + Math.cos(a) * innerRadius, lidarY + 0.002 * dir, cz + Math.sin(a) * innerRadius]);
+    }
+    drawPolygon(innerPts, "#090514", "rgba(139, 92, 246, 0.5)");
   }
 
-  function drawAcousticMic(cx, cz, islandY) {
-    const micRadius = 0.016;
+  function drawAcousticMic(cx, cz, islandY, facingDown) {
+    const micRadius = 0.018;
+    const dir = facingDown ? -1 : 1;
+    const micY = islandY + 0.004 * dir;
     const micPts = [];
-    for (let s = 0; s < 12; s += 1) {
-      const a = (s / 12) * Math.PI * 2;
-      micPts.push([cx + Math.cos(a) * micRadius, islandY + 0.004, cz + Math.sin(a) * micRadius]);
+    for (let s = 0; s < 16; s += 1) {
+      const a = (s / 16) * Math.PI * 2;
+      micPts.push([cx + Math.cos(a) * micRadius, micY, cz + Math.sin(a) * micRadius]);
     }
-    drawPolygon(micPts, "#020617", "#334155");
+    drawPolygon(micPts, "#020617", "#64748b");
   }
 
   // --- IPHONE DISPLAY SCREEN (Front Face: OLED, Dynamic Island & Live Viewfinder) ---
@@ -691,6 +726,7 @@
 
   // --- IPHONE BACK PANEL & TRIPLE CAMERA (Rear Face: Matte AG Glass, Apple Logo & Camera Island) ---
   function drawIPhoneBackPanel(phone, faceY, facingDown) {
+    const dir = facingDown ? -1 : 1;
     const topPoints = makeRoundedRect3D(phone.left, phone.right, phone.back, phone.front, phone.radius, faceY, 6);
 
     const pTopLeft = project(phone.left, faceY, phone.back);
@@ -698,13 +734,13 @@
     const glassFinish = context.createLinearGradient(
       pTopLeft.x, pTopLeft.y, pBottomRight.x, pBottomRight.y
     );
-    glassFinish.addColorStop(0, "#3a4048");
-    glassFinish.addColorStop(0.3, "#4b5563");
-    glassFinish.addColorStop(0.65, "#2d333b");
-    glassFinish.addColorStop(1, "#373e47");
+    glassFinish.addColorStop(0, "#262c34");
+    glassFinish.addColorStop(0.35, "#3d4653");
+    glassFinish.addColorStop(0.7, "#242932");
+    glassFinish.addColorStop(1, "#2f3640");
     drawPolygon(topPoints, glassFinish);
 
-    drawLine(topPoints.concat([topPoints[0]]), "#cbd5e1", 1.4);
+    drawLine(topPoints.concat([topPoints[0]]), "#94a3b8", 1.4);
 
     const innerGlassPts = makeRoundedRect3D(
       phone.left + 0.025,
@@ -712,17 +748,18 @@
       phone.back + 0.025,
       phone.front - 0.025,
       phone.radius - 0.025,
-      faceY + (facingDown ? -0.001 : 0.001),
+      faceY + 0.001 * dir,
       6
     );
-    drawLine(innerGlassPts.concat([innerGlassPts[0]]), "rgba(255, 255, 255, 0.12)", 1);
+    drawLine(innerGlassPts.concat([innerGlassPts[0]]), "rgba(255, 255, 255, 0.15)", 1);
 
     // Apple Logo & iPhone typography
-    drawAppleLogo(0, 0.14, faceY + (facingDown ? -0.001 : 0.001));
-    drawIPhoneMarking("iPhone", 0, 0.88, faceY + (facingDown ? -0.001 : 0.001), 13);
+    drawAppleLogo(0, 0.14, faceY + 0.001 * dir, facingDown);
+    drawIPhoneMarking("iPhone", 0, 0.88, faceY + 0.001 * dir, 13);
 
-    // Elevated Squircle Camera Island
-    const islandY = facingDown ? faceY - 0.038 : faceY + 0.038;
+    // Elevated Squircle Camera Island with 3D Sculpted Bevel Walls
+    const islandHeight = 0.048;
+    const islandY = faceY + islandHeight * dir;
     const island = {
       left: -0.58,
       right: 0.08,
@@ -738,19 +775,34 @@
       island.back - 0.015,
       island.front + 0.015,
       island.radius + 0.015,
-      faceY + (facingDown ? -0.001 : 0.001),
-      5
+      faceY + 0.001 * dir,
+      6
     );
-    drawPolygon(islandShadow, "rgba(0, 0, 0, 0.48)");
+    drawPolygon(islandShadow, "rgba(0, 0, 0, 0.52)");
 
-    const islandBasePts = makeRoundedRect3D(island.left, island.right, island.back, island.front, island.radius, faceY, 5);
-    const islandTopPts = makeRoundedRect3D(island.left, island.right, island.back, island.front, island.radius, island.topY, 5);
+    const islandBasePts = makeRoundedRect3D(island.left, island.right, island.back, island.front, island.radius, faceY, 6);
+    const islandTopPts = makeRoundedRect3D(island.left, island.right, island.back, island.front, island.radius, island.topY, 6);
 
     for (let i = 0; i < islandTopPts.length; i += 1) {
       const next = (i + 1) % islandTopPts.length;
+      const p1 = islandTopPts[i];
+      const p2 = islandTopPts[next];
+      const dx = p2[0] - p1[0];
+      const dz = p2[2] - p1[2];
+      const nx = dz;
+      const nz = -dx;
+      const len = Math.hypot(nx, nz) || 1;
+      const unitNx = nx / len;
+      const unitNz = nz / len;
+
+      const lightDot = unitNx * Math.cos(0.85 + yaw) + unitNz * Math.sin(0.85 + yaw);
+      const intensity = Math.round(55 + lightDot * 42);
+      const wallColor = "rgb(" + intensity + ", " + (intensity + 6) + ", " + (intensity + 12) + ")";
       drawPolygon(
-        [islandTopPts[i], islandTopPts[next], islandBasePts[next], islandBasePts[i]],
-        "#2d333b"
+        facingDown
+          ? [islandBasePts[i], islandBasePts[next], islandTopPts[next], islandTopPts[i]]
+          : [islandTopPts[i], islandTopPts[next], islandBasePts[next], islandBasePts[i]],
+        wallColor
       );
     }
 
@@ -762,24 +814,24 @@
       islandScreenCorners[0].x, islandScreenCorners[0].y,
       islandScreenCorners[1].x, islandScreenCorners[1].y
     );
-    islandGrad.addColorStop(0, "#2a3038");
-    islandGrad.addColorStop(0.5, "#38414d");
-    islandGrad.addColorStop(1, "#21262d");
+    islandGrad.addColorStop(0, "#2c333c");
+    islandGrad.addColorStop(0.5, "#3d4754");
+    islandGrad.addColorStop(1, "#232831");
     drawPolygon(islandTopPts, islandGrad);
-    drawLine(islandTopPts.concat([islandTopPts[0]]), "#94a3b8", 1.2);
+    drawLine(islandTopPts.concat([islandTopPts[0]]), "#cbd5e1", 1.4);
 
-    const lensRadius = 0.098;
-    const lensHeight = facingDown ? -0.024 : 0.024;
+    const lensRadius = 0.108;
+    const lensHeight = 0.054 * dir;
 
-    drawRealisticLens(-0.40, -1.00, island.topY, lensRadius, lensHeight, "wide");
-    drawRealisticLens(-0.40, -0.64, island.topY, lensRadius, lensHeight, "telephoto");
-    drawRealisticLens(-0.12, -0.82, island.topY, lensRadius, lensHeight, "ultrawide");
+    drawRealisticLens(-0.40, -0.99, island.topY, lensRadius, lensHeight, "wide", facingDown);
+    drawRealisticLens(-0.40, -0.65, island.topY, lensRadius, lensHeight, "telephoto", facingDown);
+    drawRealisticLens(-0.13, -0.82, island.topY, lensRadius, lensHeight, "ultrawide", facingDown);
 
-    drawTrueToneFlash(-0.12, -1.05, island.topY);
-    drawLidarScanner(-0.12, -0.61, island.topY);
-    drawAcousticMic(-0.40, -0.48, island.topY);
+    drawTrueToneFlash(-0.13, -1.04, island.topY, facingDown);
+    drawLidarScanner(-0.13, -0.61, island.topY, facingDown);
+    drawAcousticMic(-0.40, -0.49, island.topY, facingDown);
 
-    return project(-0.40, island.topY + lensHeight, -1.00);
+    return project(-0.40, island.topY + lensHeight, -0.99);
   }
 
   function drawTripodPhone(box) {
@@ -894,19 +946,30 @@
     // Bottom: USB-C port cutout
     drawLine([[0 - 0.06, phoneMidY, phone.front + 0.002], [0 + 0.06, phoneMidY, phone.front + 0.002]], "#020617", 3);
 
-    // 4. DUAL-SIDED RENDERING:
+    // 4. DUAL-SIDED RENDERING (PITCH-AWARE SORTING):
     // Default Mode (phoneFlipped === false):
     // - Display Screen is on TOP (phoneTopY), facing the user with live viewfinder capturing rice!
     // - Triple Camera is on BOTTOM (phoneBottomY), facing below into the chamber hole to capture rice!
     let cameraLens;
     if (!phoneFlipped) {
-      // Default: Camera facing below into chamber, Display Screen on top
-      cameraLens = drawIPhoneBackPanel(phone, phoneBottomY, true);
-      drawIPhoneScreen(phone, phoneTopY);
+      if (pitch < 0) {
+        // Viewing from BELOW: Top face is further away, bottom face is closer to viewer -> draw second
+        drawIPhoneScreen(phone, phoneTopY);
+        cameraLens = drawIPhoneBackPanel(phone, phoneBottomY, true);
+      } else {
+        // Viewing from ABOVE: Bottom face is further away, top face is closer to viewer -> draw second
+        cameraLens = drawIPhoneBackPanel(phone, phoneBottomY, true);
+        drawIPhoneScreen(phone, phoneTopY);
+      }
     } else {
       // Flipped Inspection: Display Screen on bottom, Camera on top
-      drawIPhoneScreen(phone, phoneBottomY);
-      cameraLens = drawIPhoneBackPanel(phone, phoneTopY, false);
+      if (pitch < 0) {
+        cameraLens = drawIPhoneBackPanel(phone, phoneTopY, false);
+        drawIPhoneScreen(phone, phoneBottomY);
+      } else {
+        drawIPhoneScreen(phone, phoneBottomY);
+        cameraLens = drawIPhoneBackPanel(phone, phoneTopY, false);
+      }
     }
 
     // 5. Studio Lab Clamps Gripping Phone at Waist (Left & Right Flanks)
