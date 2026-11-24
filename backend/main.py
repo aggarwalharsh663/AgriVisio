@@ -21,6 +21,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from backend.calibration import calibrate
 from backend.database import get_batch as read_batch
@@ -1649,6 +1650,19 @@ class ProtectedDataFilesApp(StaticFiles):
             "Cache-Control": "private, max-age=86400",
         }
         return FileResponse(target_path, media_type=media_type, headers=headers)
+
+
+@app.exception_handler(StarletteHTTPException)
+async def custom_http_exception_handler(request: Request, exc: StarletteHTTPException):
+    accept = request.headers.get("accept", "")
+    if "text/html" in accept and exc.status_code in (404, 500):
+        error_html = FRONTEND_DIR / "error.html"
+        if error_html.is_file():
+            return FileResponse(error_html, status_code=exc.status_code, media_type="text/html")
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail},
+    )
 
 
 app.mount("/files", ProtectedDataFilesApp(directory=DATA_DIR), name="files")

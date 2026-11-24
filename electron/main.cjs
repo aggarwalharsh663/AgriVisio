@@ -857,6 +857,19 @@ function registerProtocolHandler() {
         });
       }
 
+      const errorPage = path.join(FRONTEND_DIR, 'error.html');
+      if (fs.existsSync(errorPage)) {
+        const errorHtml = fs.readFileSync(errorPage);
+        return new Response(errorHtml, {
+          status: 404,
+          headers: {
+            'content-type': 'text/html; charset=utf-8',
+            'cache-control': 'no-cache, no-store, must-revalidate',
+            'x-content-type-options': 'nosniff',
+            'content-security-policy': CSP_POLICY,
+          },
+        });
+      }
       return new Response('Not Found', { status: 404 });
     } catch (err) {
       log('[Protocol Error]', err);

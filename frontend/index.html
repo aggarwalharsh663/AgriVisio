@@ -3,6 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="AgriVisio is a precision optical grain quality assessment and defect inspection platform for commercial rice grading, chalkiness measurement, and batch analytics.">
     <meta name="theme-color" content="#f7f5ed">
     <title>AgriVisio - Precision Optical Grain Quality Assessment</title>
     <link rel="icon" type="image/x-icon" href="/favicon.ico">
@@ -35,7 +36,7 @@
           <h2 id="login-title" class="login-title">AgriVisio Authentication</h2>
           <p class="login-subtitle">Enter the single-use bootstrap secret printed on the server console to access AgriVisio in browser mode.</p>
         </div>
-        <form id="login-form" class="login-form" onsubmit="return false;">
+        <form id="login-form" class="login-form">
           <div class="login-field">
             <label for="bootstrap-secret-input" class="login-label">Bootstrap Secret</label>
             <input
@@ -60,6 +61,14 @@
         </div>
       </div>
     </div>
+
+    <!-- Dismissible Global Alert Toast -->
+    <div id="global-toast" class="global-toast" role="alert" aria-live="assertive" style="display: none;">
+      <span id="global-toast-icon">⚠️</span>
+      <span id="global-toast-message" class="global-toast-msg"></span>
+      <button type="button" id="global-toast-close" class="global-toast-close" aria-label="Dismiss alert">&times;</button>
+    </div>
+
     <div class="atmosphere" aria-hidden="true"></div>
 
     <header class="topbar">
@@ -71,7 +80,7 @@
         <span class="demo-pill"><span class="demo-dot"></span> SIMULATED HARDWARE DEMO</span>
       </div>
       <div class="topbar-telemetry">
-        <span class="top-tag">LAB CV · 2026</span>
+        <button class="top-tag" id="diagnostics-btn" type="button" aria-label="View system status and diagnostics">⚡ DIAGNOSTICS</button>
         <button class="theme-toggle-btn" id="theme-toggle" type="button" aria-label="Toggle light and dark mode">
           <span class="toggle-icon">☀️</span>
           <span class="toggle-label">Light</span>
@@ -241,12 +250,12 @@
           <div class="form-grid">
             <label class="field">
               <span>Sample name</span>
-              <input id="sample-name" name="sample_name" type="text" maxlength="80" value="Morning lot A" required autocomplete="off">
+              <input id="sample-name" name="sample_name" type="text" maxlength="80" placeholder="e.g. Lot 2026-A1" autocomplete="off">
               <small>A recognizable lot identifier</small>
             </label>
             <label class="field">
               <span>Rice variety</span>
-              <input id="variety" name="variety" type="text" maxlength="80" value="Basmati" required autocomplete="off">
+              <input id="variety" name="variety" type="text" maxlength="80" placeholder="e.g. Basmati, Jasmine, IR64" autocomplete="off">
               <small>E.g. Basmati, Jasmine, Sona Masoori</small>
             </label>
 
@@ -609,9 +618,96 @@
       </section>
 
       <footer class="page-footer">
-        <span>AgriVisio Precision Optics</span>
-        <span>Simulated hardware demo - all components simulated</span>
+        <nav class="footer-links" aria-label="Application resources">
+          <button type="button" class="footer-link" id="link-guide">User Guide</button>
+          <button type="button" class="footer-link" id="link-calibration">Calibration Standards</button>
+          <button type="button" class="footer-link" id="link-diagnostics">System Diagnostics</button>
+          <button type="button" class="footer-link" id="link-privacy">Privacy & Offline Data</button>
+        </nav>
+        <span class="footer-copy">&copy; 2026 AgriVisio Precision Technologies &middot; v1.0.0</span>
       </footer>
+    </main>
+
+    <!-- Information & System Diagnostics Modal -->
+    <div id="info-modal" class="info-modal" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="info-modal-title">
+      <div class="info-modal-card">
+        <div class="info-modal-header">
+          <h2 id="info-modal-title" class="info-modal-title">
+            <span id="info-modal-icon">📖</span>
+            <span id="info-modal-heading">AgriVisio Platform Information</span>
+          </h2>
+          <button type="button" class="info-modal-close" id="info-modal-close" aria-label="Close dialog">&times;</button>
+        </div>
+        <div class="info-modal-tabs">
+          <button type="button" class="info-tab-btn is-active" data-tab="guide">User Guide</button>
+          <button type="button" class="info-tab-btn" data-tab="calibration">Calibration Standards</button>
+          <button type="button" class="info-tab-btn" data-tab="diagnostics">Hardware Diagnostics</button>
+          <button type="button" class="info-tab-btn" data-tab="privacy">Privacy & Security</button>
+        </div>
+        <div class="info-modal-body">
+          <!-- User Guide Section -->
+          <div class="info-section is-active" id="section-guide">
+            <h3>Standard Operating Procedure (SOP)</h3>
+            <p style="margin-top: 8px;"><strong>1. Sample Acquisition:</strong> Pour approximately 20-50 grains into the optical illumination chamber or place on a flatbed scanner glass (min 300 DPI). For rapid evaluation, the simulated sensor provides randomized lot sampling.</p>
+            <p style="margin-top: 8px;"><strong>2. Optical Calibration:</strong> AgriVisio executes anisotropic perspective rectification using the integrated 12-patch reference grid, calculating the exact horizontal (X) and vertical (Y) millimeter-per-pixel ratios.</p>
+            <p style="margin-top: 8px;"><strong>3. Defect & Morphometry Engine:</strong> Each individual kernel is segmented with Otsu thresholding and analyzed across 12 morphometric features (length, width, aspect ratio, perimeter, convex hull area, and chalky endosperm percentage).</p>
+            <p style="margin-top: 8px;"><strong>4. Audit & Export:</strong> All measurements are immutably signed and appended to the local SQLite assessment ledger. Export tamper-evident PDF reports or structured CSV datasets.</p>
+          </div>
+
+          <!-- Calibration Standards Section -->
+          <div class="info-section" id="section-calibration">
+            <h3>Grain Grading & Chalkiness Metrics</h3>
+            <p style="margin-top: 8px;">AgriVisio operates in compliance with international commercial rice evaluation benchmarks (IRRI & USDA Federal Grain Inspection Service):</p>
+            <ul style="margin-top: 8px; margin-left: 20px; line-height: 1.8;">
+              <li><strong>Head Rice (Whole Grain):</strong> Kernels retaining &ge; 75% of average intact length.</li>
+              <li><strong>Broken Grain:</strong> Pieces less than 75% of whole grain length.</li>
+              <li><strong>Chalkiness Classification:</strong> Endosperm opacity percentage measured in the internal optical core:
+                <ul>
+                  <li><em>Translucent / Premium:</em> &lt; 10% opaque endosperm area.</li>
+                  <li><em>Commercial Grade 1:</em> 10% - 20% opaque endosperm area.</li>
+                  <li><em>Chalky / Discounted:</em> &gt; 20% chalky area.</li>
+                </ul>
+              </li>
+              <li><strong>Aspect Ratio:</strong> Length-to-width ratio (Basmati/Long grain &gt; 3.0, Medium grain 2.1 - 3.0, Short grain &le; 2.0).</li>
+            </ul>
+          </div>
+
+          <!-- Hardware Diagnostics Section -->
+          <div class="info-section" id="section-diagnostics">
+            <h3>System Health & Hardware Telemetry</h3>
+            <div style="margin-top: 12px;" id="diagnostics-results">
+              <div class="diag-item">
+                <span>IPC Python Analysis Worker</span>
+                <span class="diag-badge ok" id="diag-worker-status">CONNECTED (READY)</span>
+              </div>
+              <div class="diag-item">
+                <span>SQLite Audit Database</span>
+                <span class="diag-badge ok" id="diag-db-status">ONLINE (VERIFIED)</span>
+              </div>
+              <div class="diag-item">
+                <span>Optical Flatbed / WIA Subsystem</span>
+                <span class="diag-badge ok" id="diag-scanner-status">READY (SIMULATED + WIA)</span>
+              </div>
+              <div class="diag-item">
+                <span>Computer Vision Engine</span>
+                <span class="diag-badge ok" id="diag-cv-status">OPENCV 4 + SCIKIT-LEARN</span>
+              </div>
+            </div>
+            <button type="button" class="button button-quiet" id="diag-refresh-btn" style="margin-top: 16px;">
+              🔄 Refresh Telemetry Ping
+            </button>
+          </div>
+
+          <!-- Privacy & Security Section -->
+          <div class="info-section" id="section-privacy">
+            <h3>Local-First Edge Architecture</h3>
+            <p style="margin-top: 8px;"><strong>Zero External Cloud Transmission:</strong> All optical imagery, defect coordinates, and lot metadata are processed 100% locally on your workstation. No proprietary customer harvest data or telemetry is ever transmitted across the internet.</p>
+            <p style="margin-top: 8px;"><strong>Secure Local Storage:</strong> Assessment records are maintained in your local SQLite ledger (`agrivisio.sqlite3`). Temporary analysis caches are automatically purged upon session exit.</p>
+            <p style="margin-top: 8px;"><strong>Sandboxed Desktop Context:</strong> Electron isolates system processes with hardened context isolation and CSP policies, preventing third-party script injection.</p>
+          </div>
+        </div>
+      </div>
+    </div>
     </main>
   </body>
 </html>

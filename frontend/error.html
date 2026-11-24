@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="AgriVisio - Application Error Page">
+    <meta name="theme-color" content="#f7f5ed">
+    <title>AgriVisio - Page Not Found</title>
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
+    <link rel="icon" type="image/png" href="/assets/emblem.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@700;800;900&family=JetBrains+Mono:wght@500;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/style.css">
+    <style>
+      body.error-page-body {
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin: 0;
+        padding: 24px;
+        box-sizing: border-box;
+        background: var(--bg-page, #f7f5ed);
+        font-family: var(--font-body, "Inter", sans-serif);
+      }
+      .error-card {
+        width: 100%;
+        max-width: 560px;
+        background: var(--bg-panel, #ffffff);
+        border: 3px solid var(--border-color, #18181b);
+        border-radius: 12px;
+        box-shadow: 6px 6px 0px var(--shadow-color, #18181b);
+        padding: 36px 32px;
+        text-align: center;
+      }
+      .error-badge {
+        display: inline-block;
+        font-family: var(--font-mono, monospace);
+        font-size: 13px;
+        font-weight: 800;
+        letter-spacing: 0.1em;
+        background: var(--rose-bg, #fef2f2);
+        color: var(--rose, #ef4444);
+        border: 2px solid var(--rose, #ef4444);
+        padding: 4px 14px;
+        border-radius: 999px;
+        margin-bottom: 20px;
+      }
+      .error-code {
+        font-family: var(--font-display, "Plus Jakarta Sans", sans-serif);
+        font-size: 64px;
+        font-weight: 900;
+        line-height: 1;
+        letter-spacing: -0.04em;
+        color: var(--text-title, #09090b);
+        margin: 0 0 12px 0;
+      }
+      .error-title {
+        font-family: var(--font-display, "Plus Jakarta Sans", sans-serif);
+        font-size: 22px;
+        font-weight: 800;
+        color: var(--text-title, #09090b);
+        margin: 0 0 12px 0;
+      }
+      .error-desc {
+        font-size: 15px;
+        line-height: 1.6;
+        color: var(--text-muted, #52525b);
+        margin: 0 0 28px 0;
+      }
+      .error-actions {
+        display: flex;
+        gap: 12px;
+        justify-content: center;
+        flex-wrap: wrap;
+      }
+      .error-btn-primary {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        background: var(--primary, #f59e0b);
+        color: #000000;
+        font-family: var(--font-display, sans-serif);
+        font-size: 14px;
+        font-weight: 800;
+        text-decoration: none;
+        padding: 12px 24px;
+        border: 2px solid var(--border-color, #18181b);
+        border-radius: 6px;
+        box-shadow: 3px 3px 0px var(--shadow-color, #18181b);
+        cursor: pointer;
+        transition: transform 0.1s, box-shadow 0.1s;
+      }
+      .error-btn-primary:hover {
+        transform: translate(-1px, -1px);
+        box-shadow: 4px 4px 0px var(--shadow-color, #18181b);
+      }
+      .error-btn-quiet {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        background: var(--bg-elevated, #f0ece0);
+        color: var(--text-title, #09090b);
+        font-family: var(--font-display, sans-serif);
+        font-size: 14px;
+        font-weight: 700;
+        text-decoration: none;
+        padding: 12px 20px;
+        border: 2px solid var(--border-color, #18181b);
+        border-radius: 6px;
+        box-shadow: 3px 3px 0px var(--shadow-color, #18181b);
+        cursor: pointer;
+      }
+      .error-btn-quiet:hover {
+        background: var(--bg-subtle, #eae5d5);
+      }
+      .error-technical {
+        margin-top: 28px;
+        padding-top: 18px;
+        border-top: 1px dashed var(--border-subtle, #d6cfbe);
+        font-family: var(--font-mono, monospace);
+        font-size: 12px;
+        color: var(--text-dim, #71717a);
+        text-align: left;
+      }
+      .error-technical summary {
+        cursor: pointer;
+        font-weight: 700;
+        margin-bottom: 8px;
+      }
+    </style>
+  </head>
+  <body class="error-page-body">
+    <div class="error-card" role="alert">
+      <span class="error-badge">OPTICAL ROUTE NOT FOUND</span>
+      <div class="error-code" id="error-code-display">404</div>
+      <h1 class="error-title" id="error-title-display">Resource Not Found</h1>
+      <p class="error-desc" id="error-desc-display">
+        The requested optical grain assessment view or API endpoint could not be resolved. The resource may have been relocated, or the route path is invalid.
+      </p>
+      <div class="error-actions">
+        <a href="/" class="error-btn-primary">
+          &larr; Return to Dashboard
+        </a>
+        <button type="button" class="error-btn-quiet" onclick="window.history.back();">
+          Go Back
+        </button>
+      </div>
+      <details class="error-technical">
+        <summary>Diagnostics Information</summary>
+        <p><strong>Path:</strong> <span id="error-path-display">/</span></p>
+        <p><strong>Timestamp:</strong> <span id="error-time-display"></span></p>
+        <p><strong>Platform:</strong> AgriVisio Optical Inspection Engine</p>
+      </details>
+    </div>
+    <script>
+      (function() {
+        const pathSpan = document.getElementById("error-path-display");
+        if (pathSpan) pathSpan.textContent = window.location.pathname || "/";
+        const timeSpan = document.getElementById("error-time-display");
+        if (timeSpan) timeSpan.textContent = new Date().toISOString();
+        
+        // Match dark mode preference
+        try {
+          if (localStorage.getItem("agrivisio_theme") === "dark" || 
+             (!localStorage.getItem("agrivisio_theme") && window.matchMedia("(prefers-color-scheme: dark)").matches)) {
+            document.documentElement.classList.add("dark");
+          }
+        } catch(e) {}
+      })();
+    </script>
+  </body>
+</html>

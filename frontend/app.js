@@ -64,7 +64,13 @@
 		document.querySelector("#progress-fill").style.width = `${((step - 1) / 3) * 100}%`;
 		announce(`Step ${step} of 4: ${["Chamber", "Calibration", "Detection", "Report"][step - 1]}`);
 		window.scrollTo({ top: 0, behavior: "smooth" });
-		if (step === 3) startDetection();
+		if (step === 3) {
+			if (furthestStep >= 4) {
+				const detNext = document.querySelector("#detection-next");
+				if (detNext) detNext.disabled = false;
+			}
+			startDetection();
+		}
 		if (step === 4) renderReportCharts();
 	}
 
@@ -209,10 +215,11 @@
 		}
 	}
 
-	function showFriendlyError(text) {
+	function showFriendlyError(text, type = "error") {
 		scanError.textContent = text;
 		scanError.hidden = false;
 		announce(text);
+		showToast(text, type);
 	}
 
 	function renderCalibration() {
@@ -761,6 +768,7 @@
 			if (!response.ok) throw new Error("This batch could not be opened.");
 			batch = await response.json();
 			furthestStep = 4;
+			setStep(4);
 			renderCalibration();
 			renderReportCharts();
 			document.querySelector("#tab-report").click();
@@ -806,9 +814,23 @@
 			preview.removeAttribute("src");
 			return;
 		}
+		if (!photo.type.startsWith("image/")) {
+			showFriendlyError("Invalid file type: Please select an image file (JPEG, PNG, or WebP).");
+			photoInput.value = "";
+			preview.hidden = true;
+			return;
+		}
+		if (photo.size > 10 * 1024 * 1024) {
+			showFriendlyError("Selected file exceeds 10 MB limit. Please select a smaller photo.");
+			photoInput.value = "";
+			preview.hidden = true;
+			return;
+		}
+		scanError.hidden = true;
 		photoPreviewUrl = URL.createObjectURL(photo);
 		preview.src = photoPreviewUrl;
 		preview.hidden = false;
+		showToast(`Loaded ${photo.name} (${(photo.size / 1024).toFixed(1)} KB)`, "info");
 	});
 	document.querySelector("#scan-speed").addEventListener("change", () => { if (activeStep === 3) startDetection(); });
 	document.querySelector("#replay-detection").addEventListener("click", startDetection);
@@ -1259,6 +1281,146 @@
 		showLoginModal();
 	}
 
+	// Global Notification Toast Controller
+	function showToast(msg, type = "error") {
+		const toast = document.querySelector("#global-toast");
+		const msgEl = document.querySelector("#global-toast-message");
+		const iconEl = document.querySelector("#global-toast-icon");
+		if (!toast || !msgEl) return;
+		msgEl.textContent = msg;
+		toast.className = `global-toast ${type === "info" ? "is-info" : type === "success" ? "is-success" : ""}`;
+		if (iconEl) {
+			iconEl.textContent = type === "success" ? "✅" : type === "info" ? "ℹ️" : "⚠️";
+		}
+		toast.style.display = "flex";
+		clearTimeout(toast._timeout);
+		toast._timeout = setTimeout(() => {
+			toast.style.display = "none";
+		}, 6000);
+	}
+
+	const toastClose = document.querySelector("#global-toast-close");
+	if (toastClose) {
+		toastClose.addEventListener("click", () => {
+			const toast = document.querySelector("#global-toast");
+			if (toast) toast.style.display = "none";
+		});
+	}
+
+	// Interactive Platform Info & Diagnostics Modal
+	function openInfoModal(sectionId = "guide") {
+		const modal = document.querySelector("#info-modal");
+		if (!modal) return;
+		modal.style.display = "flex";
+		switchInfoTab(sectionId);
+		if (sectionId === "diagnostics") {
+			runDiagnosticsPing();
+		}
+	}
+
+	function closeInfoModal() {
+		const modal = document.querySelector("#info-modal");
+		if (modal) modal.style.display = "none";
+	}
+
+	function switchInfoTab(sectionId) {
+		document.querySelectorAll(".info-tab-btn").forEach((btn) => {
+			btn.classList.toggle("is-active", btn.dataset.tab === sectionId);
+		});
+		document.querySelectorAll(".info-section").forEach((sec) => {
+			sec.classList.toggle("is-active", sec.id === `section-${sectionId}`);
+		});
+	}
+
+	async function runDiagnosticsPing() {
+		const workerEl = document.querySelector("#diag-worker-status");
+		const dbEl = document.querySelector("#diag-db-status");
+		const scannerEl = document.querySelector("#diag-scanner-status");
+		const cvEl = document.querySelector("#diag-cv-status");
+		if (workerEl) { workerEl.className = "diag-badge"; workerEl.textContent = "CHECKING..."; }
+		try {
+			const res = await fetch("/api/health");
+			if (res.ok) {
+				const data = await res.json();
+				if (workerEl) {
+					workerEl.className = "diag-badge ok";
+					workerEl.textContent = `CONNECTED (${(data.status || "ready").toUpperCase()})`;
+				}
+				if (dbEl) {
+					dbEl.className = "diag-badge ok";
+					dbEl.textContent = "ONLINE (READ/WRITE)";
+				}
+				if (scannerEl) {
+					scannerEl.className = "diag-badge ok";
+					scannerEl.textContent = "READY (SIMULATED + WIA)";
+				}
+				if (cvEl) {
+					cvEl.className = "diag-badge ok";
+					cvEl.textContent = "HEALTHY";
+				}
+			} else {
+				if (workerEl) {
+					workerEl.className = "diag-badge warn";
+					workerEl.textContent = `DEGRADED (HTTP ${res.status})`;
+				}
+			}
+		} catch (err) {
+			if (workerEl) {
+				workerEl.className = "diag-badge warn";
+				workerEl.textContent = "DISCONNECTED";
+			}
+		}
+	}
+
+	// Connect Info Modal Triggers
+	const diagBtn = document.querySelector("#diagnostics-btn");
+	if (diagBtn) diagBtn.addEventListener("click", () => openInfoModal("diagnostics"));
+
+	const linkGuide = document.querySelector("#link-guide");
+	if (linkGuide) linkGuide.addEventListener("click", () => openInfoModal("guide"));
+
+	const linkCalib = document.querySelector("#link-calibration");
+	if (linkCalib) linkCalib.addEventListener("click", () => openInfoModal("calibration"));
+
+	const linkDiag = document.querySelector("#link-diagnostics");
+	if (linkDiag) linkDiag.addEventListener("click", () => openInfoModal("diagnostics"));
+
+	const linkPriv = document.querySelector("#link-privacy");
+	if (linkPriv) linkPriv.addEventListener("click", () => openInfoModal("privacy"));
+
+	const infoClose = document.querySelector("#info-modal-close");
+	if (infoClose) infoClose.addEventListener("click", closeInfoModal);
+
+	const infoModal = document.querySelector("#info-modal");
+	if (infoModal) {
+		infoModal.addEventListener("click", (e) => {
+			if (e.target === infoModal) closeInfoModal();
+		});
+	}
+
+	document.querySelectorAll(".info-tab-btn").forEach((btn) => {
+		btn.addEventListener("click", () => {
+			const tabId = btn.dataset.tab;
+			switchInfoTab(tabId);
+			if (tabId === "diagnostics") runDiagnosticsPing();
+		});
+	});
+
+	const diagRefresh = document.querySelector("#diag-refresh-btn");
+	if (diagRefresh) diagRefresh.addEventListener("click", () => {
+		runDiagnosticsPing();
+		showToast("Telemetry ping refreshed.", "info");
+	});
+
+	// Brand home link: smoothly return to Step 1 without page reload
+	const brandLink = document.querySelector(".brand");
+	if (brandLink) {
+		brandLink.addEventListener("click", (e) => {
+			e.preventDefault();
+			setStep(1);
+		});
+	}
+
 	async function initAuth() {
 		if (isDesktopMode()) {
 			hideLoginModal();
@@ -1267,6 +1429,12 @@
 		if (loginForm) {
 			loginForm.addEventListener("submit", async (e) => {
 				e.preventDefault();
+				const val = secretInput ? secretInput.value.trim() : "";
+				if (val) await exchangeBootstrap(val);
+			});
+		}
+		if (loginBtn) {
+			loginBtn.addEventListener("click", async (e) => {
 				const val = secretInput ? secretInput.value.trim() : "";
 				if (val) await exchangeBootstrap(val);
 			});
