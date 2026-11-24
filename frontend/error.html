@@ -12,6 +12,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@700;800;900&family=JetBrains+Mono:wght@500;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/style.css">
+    <script src="/error.js" defer></script>
     <style>
       body.error-page-body {
         min-height: 100vh;
@@ -143,7 +144,7 @@
         <a href="/" class="error-btn-primary">
           &larr; Return to Dashboard
         </a>
-        <button type="button" class="error-btn-quiet" onclick="window.history.back();">
+        <button type="button" class="error-btn-quiet" id="error-back-btn">
           Go Back
         </button>
       </div>
@@ -154,21 +155,5 @@
         <p><strong>Platform:</strong> AgriVisio Optical Inspection Engine</p>
       </details>
     </div>
-    <script>
-      (function() {
-        const pathSpan = document.getElementById("error-path-display");
-        if (pathSpan) pathSpan.textContent = window.location.pathname || "/";
-        const timeSpan = document.getElementById("error-time-display");
-        if (timeSpan) timeSpan.textContent = new Date().toISOString();
-        
-        // Match dark mode preference
-        try {
-          if (localStorage.getItem("agrivisio_theme") === "dark" || 
-             (!localStorage.getItem("agrivisio_theme") && window.matchMedia("(prefers-color-scheme: dark)").matches)) {
-            document.documentElement.classList.add("dark");
-          }
-        } catch(e) {}
-      })();
-    </script>
   </body>
 </html>

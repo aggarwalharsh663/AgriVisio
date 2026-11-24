@@ -1308,19 +1308,31 @@
 	}
 
 	// Interactive Platform Info & Diagnostics Modal
+	let previousActiveElement = null;
+
 	function openInfoModal(sectionId = "guide") {
 		const modal = document.querySelector("#info-modal");
 		if (!modal) return;
+		previousActiveElement = document.activeElement;
 		modal.style.display = "flex";
+		modal.setAttribute("aria-hidden", "false");
 		switchInfoTab(sectionId);
 		if (sectionId === "diagnostics") {
 			runDiagnosticsPing();
 		}
+		const closeBtn = document.querySelector("#info-modal-close");
+		if (closeBtn) closeBtn.focus();
 	}
 
 	function closeInfoModal() {
 		const modal = document.querySelector("#info-modal");
-		if (modal) modal.style.display = "none";
+		if (modal && modal.style.display !== "none") {
+			modal.style.display = "none";
+			modal.setAttribute("aria-hidden", "true");
+			if (previousActiveElement && typeof previousActiveElement.focus === "function") {
+				previousActiveElement.focus();
+			}
+		}
 	}
 
 	function switchInfoTab(sectionId) {
@@ -1332,16 +1344,30 @@
 		});
 	}
 
+	let diagnosticsPingSeq = 0;
+
 	async function runDiagnosticsPing() {
+		const currentSeq = ++diagnosticsPingSeq;
 		const workerEl = document.querySelector("#diag-worker-status");
 		const dbEl = document.querySelector("#diag-db-status");
 		const scannerEl = document.querySelector("#diag-scanner-status");
 		const cvEl = document.querySelector("#diag-cv-status");
-		if (workerEl) { workerEl.className = "diag-badge"; workerEl.textContent = "CHECKING..."; }
+		const allBadges = [workerEl, dbEl, scannerEl, cvEl];
+
+		// Reset all badges before health verification
+		allBadges.forEach((el) => {
+			if (el) {
+				el.className = "diag-badge";
+				el.textContent = "CHECKING...";
+			}
+		});
+
 		try {
 			const res = await fetch("/api/health");
+			if (currentSeq !== diagnosticsPingSeq) return;
 			if (res.ok) {
 				const data = await res.json();
+				if (currentSeq !== diagnosticsPingSeq) return;
 				if (workerEl) {
 					workerEl.className = "diag-badge ok";
 					workerEl.textContent = `CONNECTED (${(data.status || "ready").toUpperCase()})`;
@@ -1363,11 +1389,36 @@
 					workerEl.className = "diag-badge warn";
 					workerEl.textContent = `DEGRADED (HTTP ${res.status})`;
 				}
+				if (dbEl) {
+					dbEl.className = "diag-badge warn";
+					dbEl.textContent = "UNKNOWN";
+				}
+				if (scannerEl) {
+					scannerEl.className = "diag-badge warn";
+					scannerEl.textContent = "UNKNOWN";
+				}
+				if (cvEl) {
+					cvEl.className = "diag-badge warn";
+					cvEl.textContent = "UNKNOWN";
+				}
 			}
 		} catch (err) {
+			if (currentSeq !== diagnosticsPingSeq) return;
 			if (workerEl) {
 				workerEl.className = "diag-badge warn";
 				workerEl.textContent = "DISCONNECTED";
+			}
+			if (dbEl) {
+				dbEl.className = "diag-badge warn";
+				dbEl.textContent = "OFFLINE";
+			}
+			if (scannerEl) {
+				scannerEl.className = "diag-badge warn";
+				scannerEl.textContent = "UNAVAILABLE";
+			}
+			if (cvEl) {
+				cvEl.className = "diag-badge warn";
+				cvEl.textContent = "UNAVAILABLE";
 			}
 		}
 	}
@@ -1395,6 +1446,30 @@
 	if (infoModal) {
 		infoModal.addEventListener("click", (e) => {
 			if (e.target === infoModal) closeInfoModal();
+		});
+
+		// Keyboard accessibility: Escape to close and Tab trapping
+		window.addEventListener("keydown", (e) => {
+			if (infoModal.style.display !== "none") {
+				if (e.key === "Escape") {
+					e.preventDefault();
+					closeInfoModal();
+					return;
+				}
+				if (e.key === "Tab") {
+					const focusable = infoModal.querySelectorAll('button:not([disabled]), [tabindex]:not([tabindex="-1"])');
+					if (!focusable.length) return;
+					const first = focusable[0];
+					const last = focusable[focusable.length - 1];
+					if (e.shiftKey && document.activeElement === first) {
+						e.preventDefault();
+						last.focus();
+					} else if (!e.shiftKey && document.activeElement === last) {
+						e.preventDefault();
+						first.focus();
+					}
+				}
+			}
 		});
 	}
 

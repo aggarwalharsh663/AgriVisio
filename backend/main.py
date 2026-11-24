@@ -1655,13 +1655,14 @@ class ProtectedDataFilesApp(StaticFiles):
 @app.exception_handler(StarletteHTTPException)
 async def custom_http_exception_handler(request: Request, exc: StarletteHTTPException):
     accept = request.headers.get("accept", "")
-    if "text/html" in accept and exc.status_code in (404, 500):
+    if "text/html" in accept and exc.status_code == 404:
         error_html = FRONTEND_DIR / "error.html"
         if error_html.is_file():
-            return FileResponse(error_html, status_code=exc.status_code, media_type="text/html")
+            return FileResponse(error_html, status_code=404, media_type="text/html", headers=exc.headers)
     return JSONResponse(
         status_code=exc.status_code,
         content={"detail": exc.detail},
+        headers=exc.headers,
     )
 
 

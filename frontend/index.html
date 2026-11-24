@@ -649,7 +649,7 @@
           <div class="info-section is-active" id="section-guide">
             <h3>Standard Operating Procedure (SOP)</h3>
             <p style="margin-top: 8px;"><strong>1. Sample Acquisition:</strong> Pour approximately 20-50 grains into the optical illumination chamber or place on a flatbed scanner glass (min 300 DPI). For rapid evaluation, the simulated sensor provides randomized lot sampling.</p>
-            <p style="margin-top: 8px;"><strong>2. Optical Calibration:</strong> AgriVisio executes anisotropic perspective rectification using the integrated 12-patch reference grid, calculating the exact horizontal (X) and vertical (Y) millimeter-per-pixel ratios.</p>
+            <p style="margin-top: 8px;"><strong>2. Optical Calibration:</strong> Simulated chamber and flatbed scanner modes perform automatic perspective and color rectification via the integrated reference target. For custom photo uploads, users can enter explicit millimeter-per-pixel calibration values or reference coin/ruler dimensions; if omitted, an assumed commercial baseline (0.12 mm/px) is indicated in the report.</p>
             <p style="margin-top: 8px;"><strong>3. Defect & Morphometry Engine:</strong> Each individual kernel is segmented with Otsu thresholding and analyzed across 12 morphometric features (length, width, aspect ratio, perimeter, convex hull area, and chalky endosperm percentage).</p>
             <p style="margin-top: 8px;"><strong>4. Audit & Export:</strong> All measurements are immutably signed and appended to the local SQLite assessment ledger. Export tamper-evident PDF reports or structured CSV datasets.</p>
           </div>
@@ -678,19 +678,19 @@
             <div style="margin-top: 12px;" id="diagnostics-results">
               <div class="diag-item">
                 <span>IPC Python Analysis Worker</span>
-                <span class="diag-badge ok" id="diag-worker-status">CONNECTED (READY)</span>
+                <span class="diag-badge" id="diag-worker-status">PENDING PING</span>
               </div>
               <div class="diag-item">
                 <span>SQLite Audit Database</span>
-                <span class="diag-badge ok" id="diag-db-status">ONLINE (VERIFIED)</span>
+                <span class="diag-badge" id="diag-db-status">PENDING PING</span>
               </div>
               <div class="diag-item">
                 <span>Optical Flatbed / WIA Subsystem</span>
-                <span class="diag-badge ok" id="diag-scanner-status">READY (SIMULATED + WIA)</span>
+                <span class="diag-badge" id="diag-scanner-status">PENDING PING</span>
               </div>
               <div class="diag-item">
                 <span>Computer Vision Engine</span>
-                <span class="diag-badge ok" id="diag-cv-status">OPENCV 4 + SCIKIT-LEARN</span>
+                <span class="diag-badge" id="diag-cv-status">PENDING PING</span>
               </div>
             </div>
             <button type="button" class="button button-quiet" id="diag-refresh-btn" style="margin-top: 16px;">
