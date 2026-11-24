@@ -690,7 +690,7 @@
   }
 
   // --- IPHONE BACK PANEL & TRIPLE CAMERA (Rear Face: Matte AG Glass, Apple Logo & Camera Island) ---
-  function drawIPhoneBackPanel(phone, faceY) {
+  function drawIPhoneBackPanel(phone, faceY, facingDown) {
     const topPoints = makeRoundedRect3D(phone.left, phone.right, phone.back, phone.front, phone.radius, faceY, 6);
 
     const pTopLeft = project(phone.left, faceY, phone.back);
@@ -712,23 +712,24 @@
       phone.back + 0.025,
       phone.front - 0.025,
       phone.radius - 0.025,
-      faceY + 0.001,
+      faceY + (facingDown ? -0.001 : 0.001),
       6
     );
     drawLine(innerGlassPts.concat([innerGlassPts[0]]), "rgba(255, 255, 255, 0.12)", 1);
 
     // Apple Logo & iPhone typography
-    drawAppleLogo(0, 0.14, faceY + 0.001);
-    drawIPhoneMarking("iPhone", 0, 0.88, faceY + 0.001, 13);
+    drawAppleLogo(0, 0.14, faceY + (facingDown ? -0.001 : 0.001));
+    drawIPhoneMarking("iPhone", 0, 0.88, faceY + (facingDown ? -0.001 : 0.001), 13);
 
     // Elevated Squircle Camera Island
+    const islandY = facingDown ? faceY - 0.038 : faceY + 0.038;
     const island = {
       left: -0.58,
       right: 0.08,
       back: -1.18,
       front: -0.46,
       radius: 0.13,
-      topY: faceY + 0.038,
+      topY: islandY,
     };
 
     const islandShadow = makeRoundedRect3D(
@@ -737,7 +738,7 @@
       island.back - 0.015,
       island.front + 0.015,
       island.radius + 0.015,
-      faceY + 0.001,
+      faceY + (facingDown ? -0.001 : 0.001),
       5
     );
     drawPolygon(islandShadow, "rgba(0, 0, 0, 0.48)");
@@ -768,7 +769,7 @@
     drawLine(islandTopPts.concat([islandTopPts[0]]), "#94a3b8", 1.2);
 
     const lensRadius = 0.098;
-    const lensHeight = 0.024;
+    const lensHeight = facingDown ? -0.024 : 0.024;
 
     drawRealisticLens(-0.40, -1.00, island.topY, lensRadius, lensHeight, "wide");
     drawRealisticLens(-0.40, -0.64, island.topY, lensRadius, lensHeight, "telephoto");
@@ -893,24 +894,19 @@
     // Bottom: USB-C port cutout
     drawLine([[0 - 0.06, phoneMidY, phone.front + 0.002], [0 + 0.06, phoneMidY, phone.front + 0.002]], "#020617", 3);
 
-    // 4. DUAL-SIDED RENDERING (ONE SIDE IS SCREEN, OTHER IS BACK PANEL & CAMERA)
+    // 4. DUAL-SIDED RENDERING:
+    // Default Mode (phoneFlipped === false):
+    // - Display Screen is on TOP (phoneTopY), facing the user with live viewfinder capturing rice!
+    // - Triple Camera is on BOTTOM (phoneBottomY), facing below into the chamber hole to capture rice!
     let cameraLens;
     if (!phoneFlipped) {
-      // Default Mode: Back Panel on Top, Screen on Bottom
-      if (pitch < 0) {
-        // Looking from below: draw bottom Screen
-        drawIPhoneScreen(phone, phoneBottomY);
-      }
-      cameraLens = drawIPhoneBackPanel(phone, phoneTopY);
-    } else {
-      // Scanning / Screen Mode: Screen on Top, Back Panel on Bottom
-      if (pitch < 0) {
-        // Looking from below: draw bottom Camera Back
-        cameraLens = drawIPhoneBackPanel(phone, phoneBottomY);
-      } else {
-        cameraLens = project(-0.40, phoneBottomY - 0.02, -1.00);
-      }
+      // Default: Camera facing below into chamber, Display Screen on top
+      cameraLens = drawIPhoneBackPanel(phone, phoneBottomY, true);
       drawIPhoneScreen(phone, phoneTopY);
+    } else {
+      // Flipped Inspection: Display Screen on bottom, Camera on top
+      drawIPhoneScreen(phone, phoneBottomY);
+      cameraLens = drawIPhoneBackPanel(phone, phoneTopY, false);
     }
 
     // 5. Studio Lab Clamps Gripping Phone at Waist (Left & Right Flanks)
@@ -949,14 +945,14 @@
 
   // --- INTERACTIVE ON-CANVAS HUD TOGGLE ---
   function drawFlipButton() {
-    const btnW = 186;
-    const btnH = 32;
-    const btnX = WIDTH - btnW - 20;
-    const btnY = 18;
+    const btnW = 190;
+    const btnH = 28;
+    const btnX = 26;
+    const btnY = 94;
 
     context.save();
     context.beginPath();
-    const r = 16;
+    const r = 14;
     context.moveTo(btnX + r, btnY);
     context.lineTo(btnX + btnW - r, btnY);
     context.arc(btnX + btnW - r, btnY + r, r, -Math.PI / 2, Math.PI / 2);
@@ -966,7 +962,7 @@
 
     context.fillStyle = "rgba(15, 23, 42, 0.88)";
     context.fill();
-    context.strokeStyle = "rgba(148, 163, 184, 0.45)";
+    context.strokeStyle = "rgba(148, 163, 184, 0.5)";
     context.lineWidth = 1.2;
     context.stroke();
 
@@ -975,10 +971,10 @@
     context.textBaseline = "middle";
 
     context.fillStyle = "#38bdf8";
-    context.fillText("⇄", btnX + 18, btnY + btnH / 2);
+    context.fillText("⇄", btnX + 16, btnY + btnH / 2);
 
     context.fillStyle = "#f8fafc";
-    const label = phoneFlipped ? "Flip: View Camera Back" : "Flip: View Screen & App";
+    const label = phoneFlipped ? "Flip: Camera Facing Below" : "Flip: Camera Facing Top";
     context.fillText(label, btnX + btnW / 2 + 8, btnY + btnH / 2);
     context.restore();
   }
@@ -1133,10 +1129,10 @@
     pointerDownPos = { x: clickX, y: clickY, time: Date.now() };
 
     // Check if clicked the Flip button
-    const btnW = 186;
-    const btnH = 32;
-    const btnX = WIDTH - btnW - 20;
-    const btnY = 18;
+    const btnW = 190;
+    const btnH = 28;
+    const btnX = 26;
+    const btnY = 94;
     if (clickX >= btnX && clickX <= btnX + btnW && clickY >= btnY && clickY <= btnY + btnH) {
       phoneFlipped = !phoneFlipped;
       return;
