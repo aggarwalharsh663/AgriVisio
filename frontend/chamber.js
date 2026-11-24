@@ -391,7 +391,7 @@
       const angle = (i / segments) * Math.PI * 2;
       const nx = Math.cos(angle + Math.PI / segments);
       const nz = Math.sin(angle + Math.PI / segments);
-      const viewDir = -nx * Math.sin(yaw) + nz * Math.cos(yaw);
+      const viewDir = nx * Math.sin(yaw) + nz * Math.cos(yaw);
       if (viewDir < -0.15) continue;
 
       const lightDot = nx * Math.cos(0.85 + yaw) + nz * Math.sin(0.85 + yaw);
@@ -913,7 +913,7 @@
       const unitNx = nx / len;
       const unitNz = nz / len;
 
-      const viewDot = -unitNx * Math.sin(yaw) + unitNz * Math.cos(yaw);
+      const viewDot = unitNx * Math.sin(yaw) + unitNz * Math.cos(yaw);
       if (viewDot < -0.1) continue;
 
       const lightDot = unitNx * Math.cos(0.75 + yaw) + unitNz * Math.sin(0.75 + yaw);
