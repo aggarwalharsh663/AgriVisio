@@ -297,6 +297,8 @@
     return points;
   }
 
+  let phoneFlipped = false; // false: Camera on Top, Screen on Bottom; true: Screen on Top, Camera on Bottom
+
   const appleLogoPath = (function () {
     try {
       if (typeof Path2D !== "undefined") {
@@ -554,6 +556,231 @@
     drawPolygon(micPts, "#020617", "#334155");
   }
 
+  // --- IPHONE DISPLAY SCREEN (Front Face: OLED, Dynamic Island & Live Viewfinder) ---
+  function drawIPhoneScreen(phone, screenY) {
+    const screenPts = makeRoundedRect3D(
+      phone.left + 0.02,
+      phone.right - 0.02,
+      phone.back + 0.02,
+      phone.front - 0.02,
+      phone.radius - 0.02,
+      screenY,
+      6
+    );
+    drawPolygon(screenPts, "#020408");
+    drawLine(screenPts.concat([screenPts[0]]), "#1e293b", 1);
+
+    const xform = getSurfaceTransform(0, screenY, 0);
+    context.save();
+    context.transform(xform.vx.x, xform.vx.y, xform.vz.x, xform.vz.y, xform.p0.x, xform.p0.y);
+
+    const scale = 220;
+    context.scale(1 / scale, 1 / scale);
+
+    const w = 276;
+    const h = 524;
+    const halfW = w / 2;
+    const halfH = h / 2;
+
+    // Viewfinder screen: live illuminated chamber preview
+    const vfTop = -halfH + 46;
+    const vfHeight = h - 130;
+    const vfGrad = context.createLinearGradient(0, vfTop, 0, vfTop + vfHeight);
+    vfGrad.addColorStop(0, "#08100e");
+    vfGrad.addColorStop(0.5, "#142520");
+    vfGrad.addColorStop(1, "#0a1411");
+    context.fillStyle = vfGrad;
+    context.fillRect(-halfW + 6, vfTop, w - 12, vfHeight);
+
+    // Rice grain silhouettes in live optical viewfinder
+    context.fillStyle = "rgba(254, 240, 138, 0.45)";
+    [
+      [-42, -50, 14, 5, 0.3], [22, -32, 16, 6, -0.4], [-12, 18, 15, 5, 0.5],
+      [48, 38, 13, 5, -0.2], [-48, 58, 16, 6, 0.6], [12, -78, 14, 5, -0.5]
+    ].forEach(function (g) {
+      context.beginPath();
+      context.ellipse(g[0], g[1], g[2], g[3], g[4], 0, Math.PI * 2);
+      context.fill();
+    });
+
+    // Yellow autofocus target reticle
+    context.strokeStyle = "#eab308";
+    context.lineWidth = 1.8;
+    const boxSize = 38;
+    context.strokeRect(-boxSize / 2, -boxSize / 2, boxSize, boxSize);
+    context.beginPath();
+    context.arc(0, 0, 2.5, 0, Math.PI * 2);
+    context.fillStyle = "#eab308";
+    context.fill();
+
+    // Autofocus HUD pill
+    context.fillStyle = "rgba(0, 0, 0, 0.7)";
+    context.fillRect(-58, boxSize / 2 + 5, 116, 17);
+    context.fillStyle = "#fef08a";
+    context.font = "bold 9.5px -apple-system, sans-serif";
+    context.textAlign = "center";
+    context.fillText("4K · 120 GRAINS DETECTED", 0, boxSize / 2 + 17);
+
+    // Dynamic Island
+    context.fillStyle = "#000000";
+    const pillW = 74;
+    const pillH = 22;
+    const pillY = -halfH + 15;
+    context.beginPath();
+    context.arc(-pillW / 2 + pillH / 2, pillY + pillH / 2, pillH / 2, Math.PI / 2, (3 * Math.PI) / 2);
+    context.arc(pillW / 2 - pillH / 2, pillY + pillH / 2, pillH / 2, -Math.PI / 2, Math.PI / 2);
+    context.closePath();
+    context.fill();
+    context.strokeStyle = "rgba(255, 255, 255, 0.12)";
+    context.lineWidth = 1;
+    context.stroke();
+
+    // Front sensor glint
+    context.beginPath();
+    context.arc(pillW / 2 - 14, pillY + pillH / 2, 3.5, 0, Math.PI * 2);
+    context.fillStyle = "#083344";
+    context.fill();
+    context.beginPath();
+    context.arc(pillW / 2 - 14, pillY + pillH / 2, 1.2, 0, Math.PI * 2);
+    context.fillStyle = "#38bdf8";
+    context.fill();
+
+    // iOS Status bar (Clock & Connectivity)
+    context.fillStyle = "#ffffff";
+    context.font = "bold 11px -apple-system, sans-serif";
+    context.textAlign = "left";
+    context.fillText("9:41", -halfW + 18, -halfH + 28);
+    context.textAlign = "right";
+    context.fillText("5G 100%", halfW - 18, -halfH + 28);
+
+    // Camera Mode Bar: "PHOTO" in yellow
+    context.font = "bold 11px -apple-system, sans-serif";
+    context.textAlign = "center";
+    context.fillStyle = "#facc15";
+    context.fillText("PHOTO", 0, halfH - 62);
+    context.fillStyle = "rgba(255, 255, 255, 0.6)";
+    context.fillText("PORTRAIT", 65, halfH - 62);
+    context.fillText("VIDEO", -65, halfH - 62);
+
+    // Zoom Buttons: 0.5 · 1x · 2 · 5
+    const zoomY = halfH - 90;
+    [-45, -15, 15, 45].forEach(function (zx, i) {
+      context.beginPath();
+      context.arc(zx, zoomY, 11, 0, Math.PI * 2);
+      context.fillStyle = i === 1 ? "rgba(255, 255, 255, 0.25)" : "rgba(0, 0, 0, 0.5)";
+      context.fill();
+      context.fillStyle = i === 1 ? "#facc15" : "#ffffff";
+      context.font = "bold 9px -apple-system, sans-serif";
+      context.fillText(["0.5", "1x", "2", "5"][i], zx, zoomY + 3);
+    });
+
+    // Shutter button at bottom
+    const shutterY = halfH - 32;
+    context.beginPath();
+    context.arc(0, shutterY, 22, 0, Math.PI * 2);
+    context.strokeStyle = "#ffffff";
+    context.lineWidth = 2.5;
+    context.stroke();
+    context.beginPath();
+    context.arc(0, shutterY, 18, 0, Math.PI * 2);
+    context.fillStyle = "#ffffff";
+    context.fill();
+
+    context.restore();
+  }
+
+  // --- IPHONE BACK PANEL & TRIPLE CAMERA (Rear Face: Matte AG Glass, Apple Logo & Camera Island) ---
+  function drawIPhoneBackPanel(phone, faceY) {
+    const topPoints = makeRoundedRect3D(phone.left, phone.right, phone.back, phone.front, phone.radius, faceY, 6);
+
+    const pTopLeft = project(phone.left, faceY, phone.back);
+    const pBottomRight = project(phone.right, faceY, phone.front);
+    const glassFinish = context.createLinearGradient(
+      pTopLeft.x, pTopLeft.y, pBottomRight.x, pBottomRight.y
+    );
+    glassFinish.addColorStop(0, "#3a4048");
+    glassFinish.addColorStop(0.3, "#4b5563");
+    glassFinish.addColorStop(0.65, "#2d333b");
+    glassFinish.addColorStop(1, "#373e47");
+    drawPolygon(topPoints, glassFinish);
+
+    drawLine(topPoints.concat([topPoints[0]]), "#cbd5e1", 1.4);
+
+    const innerGlassPts = makeRoundedRect3D(
+      phone.left + 0.025,
+      phone.right - 0.025,
+      phone.back + 0.025,
+      phone.front - 0.025,
+      phone.radius - 0.025,
+      faceY + 0.001,
+      6
+    );
+    drawLine(innerGlassPts.concat([innerGlassPts[0]]), "rgba(255, 255, 255, 0.12)", 1);
+
+    // Apple Logo & iPhone typography
+    drawAppleLogo(0, 0.14, faceY + 0.001);
+    drawIPhoneMarking("iPhone", 0, 0.88, faceY + 0.001, 13);
+
+    // Elevated Squircle Camera Island
+    const island = {
+      left: -0.58,
+      right: 0.08,
+      back: -1.18,
+      front: -0.46,
+      radius: 0.13,
+      topY: faceY + 0.038,
+    };
+
+    const islandShadow = makeRoundedRect3D(
+      island.left - 0.015,
+      island.right + 0.015,
+      island.back - 0.015,
+      island.front + 0.015,
+      island.radius + 0.015,
+      faceY + 0.001,
+      5
+    );
+    drawPolygon(islandShadow, "rgba(0, 0, 0, 0.48)");
+
+    const islandBasePts = makeRoundedRect3D(island.left, island.right, island.back, island.front, island.radius, faceY, 5);
+    const islandTopPts = makeRoundedRect3D(island.left, island.right, island.back, island.front, island.radius, island.topY, 5);
+
+    for (let i = 0; i < islandTopPts.length; i += 1) {
+      const next = (i + 1) % islandTopPts.length;
+      drawPolygon(
+        [islandTopPts[i], islandTopPts[next], islandBasePts[next], islandBasePts[i]],
+        "#2d333b"
+      );
+    }
+
+    const islandScreenCorners = [
+      project(island.left, island.topY, island.back),
+      project(island.right, island.topY, island.front),
+    ];
+    const islandGrad = context.createLinearGradient(
+      islandScreenCorners[0].x, islandScreenCorners[0].y,
+      islandScreenCorners[1].x, islandScreenCorners[1].y
+    );
+    islandGrad.addColorStop(0, "#2a3038");
+    islandGrad.addColorStop(0.5, "#38414d");
+    islandGrad.addColorStop(1, "#21262d");
+    drawPolygon(islandTopPts, islandGrad);
+    drawLine(islandTopPts.concat([islandTopPts[0]]), "#94a3b8", 1.2);
+
+    const lensRadius = 0.098;
+    const lensHeight = 0.024;
+
+    drawRealisticLens(-0.40, -1.00, island.topY, lensRadius, lensHeight, "wide");
+    drawRealisticLens(-0.40, -0.64, island.topY, lensRadius, lensHeight, "telephoto");
+    drawRealisticLens(-0.12, -0.82, island.topY, lensRadius, lensHeight, "ultrawide");
+
+    drawTrueToneFlash(-0.12, -1.05, island.topY);
+    drawLidarScanner(-0.12, -0.61, island.topY);
+    drawAcousticMic(-0.40, -0.48, island.topY);
+
+    return project(-0.40, island.topY + lensHeight, -1.00);
+  }
+
   function drawTripodPhone(box) {
     const mastX = box.right + 0.45;
     const mastZ = 0.05;
@@ -565,19 +792,37 @@
     context.globalAlpha = 1;
     context.globalCompositeOperation = "source-over";
 
+    // 1. Heavy-duty vertical lab stand column & articulated boom arm
     drawLine([[mastX, 0.15, mastZ], [mastX, phoneTopY + 0.24, mastZ]], "#1e242b", 12);
     drawLine([[mastX, 0.15, mastZ], [mastX, phoneTopY + 0.24, mastZ]], "#475569", 8);
     drawLine([[mastX, 0.15, mastZ], [mastX, phoneTopY + 0.24, mastZ]], "#94a3b8", 2);
 
+    // Cast-iron base collar at chamber floor
     drawLine([[mastX - 0.25, 0.15, mastZ], [mastX + 0.25, 0.15, mastZ]], "#1e293b", 6);
     drawLine([[mastX, 0.15, mastZ - 0.25], [mastX, 0.15, mastZ + 0.25]], "#1e293b", 6);
 
+    // Articulated boom arm extending to phone clamp
     const armY = phoneTopY + 0.14;
     drawLine([[mastX, armY, mastZ], [0.65, armY, mastZ]], "#334155", 6);
     drawLine([[mastX, armY - 0.04, mastZ], [0.65, armY - 0.04, mastZ]], "#1e293b", 4);
+    // Swivel joint collar on boom arm
     drawLine([[mastX, armY + 0.03, mastZ], [mastX, armY - 0.06, mastZ]], "#64748b", 10);
+    // Articulation link to clamp
     drawLine([[0.65, armY, mastZ], [0, phoneTopY + 0.03, mastZ + 0.22]], "#475569", 5);
 
+    // Swivel tightening knob on arm elbow (NOT on phone glass!)
+    const elbowKnob = project(0.65, armY, mastZ);
+    context.save();
+    context.beginPath();
+    context.arc(elbowKnob.x, elbowKnob.y, 6, 0, Math.PI * 2);
+    context.fillStyle = "#64748b";
+    context.fill();
+    context.strokeStyle = "#94a3b8";
+    context.lineWidth = 1.5;
+    context.stroke();
+    context.restore();
+
+    // 2. Realistic iPhone Pro Geometry
     const phone = {
       left: -0.68,
       right: 0.68,
@@ -586,6 +831,7 @@
       radius: 0.22,
     };
 
+    // Soft drop shadow cast by phone on chamber roof
     const shadowPts = makeRoundedRect3D(
       phone.left - 0.02,
       phone.right + 0.02,
@@ -595,11 +841,13 @@
       box.top,
       6
     );
-    drawPolygon(shadowPts, "rgba(0, 0, 0, 0.42)");
+    drawPolygon(shadowPts, "rgba(0, 0, 0, 0.38)");
 
     const bottomPoints = makeRoundedRect3D(phone.left, phone.right, phone.back, phone.front, phone.radius, phoneBottomY, 6);
     const topPoints = makeRoundedRect3D(phone.left, phone.right, phone.back, phone.front, phone.radius, phoneTopY, 6);
 
+    // 3. Smooth Contoured Aerospace Titanium Chassis Rails (ZERO SPIKES)
+    // Draw continuous smooth side quads without stroked seams
     for (let i = 0; i < topPoints.length; i += 1) {
       const next = (i + 1) % topPoints.length;
       const p1 = topPoints[i];
@@ -616,151 +864,123 @@
       if (viewDot < -0.1) continue;
 
       const lightDot = unitNx * Math.cos(0.75 + yaw) + unitNz * Math.sin(0.75 + yaw);
-      const bright = Math.round(92 + lightDot * 48);
+      const bright = Math.round(96 + lightDot * 48);
       const sideColor = "rgb(" + bright + ", " + (bright + 5) + ", " + (bright + 10) + ")";
-      drawPolygon([topPoints[i], topPoints[next], bottomPoints[next], bottomPoints[i]], sideColor, "#334155");
+      drawPolygon([topPoints[i], topPoints[next], bottomPoints[next], bottomPoints[i]], sideColor);
     }
 
+    // Smooth continuous top and bottom perimeter highlight rims (eliminates corner spikes)
+    drawLine(topPoints.concat([topPoints[0]]), "#cbd5e1", 1.4);
+    drawLine(bottomPoints.concat([bottomPoints[0]]), "#475569", 1.2);
+
+    // PVD Antenna Injection Lines
     [-0.72, 0.72].forEach(function (zPos) {
       drawLine([[phone.left - 0.002, phoneBottomY, zPos], [phone.left - 0.002, phoneTopY, zPos]], "#1e293b", 2.2);
       drawLine([[phone.right + 0.002, phoneBottomY, zPos], [phone.right + 0.002, phoneTopY, zPos]], "#1e293b", 2.2);
     });
 
+    // Precision Tactile Buttons
+    // Left: Action button & Volume
     drawLine([[phone.left - 0.016, phoneMidY, -0.64], [phone.left - 0.016, phoneMidY, -0.52]], "#cbd5e1", 3.5);
     drawLine([[phone.left - 0.016, phoneMidY, -0.38], [phone.left - 0.016, phoneMidY, -0.20]], "#cbd5e1", 3.5);
     drawLine([[phone.left - 0.016, phoneMidY, -0.08], [phone.left - 0.016, phoneMidY, 0.10]], "#cbd5e1", 3.5);
 
+    // Right: Side / Power button & Sapphire Camera Control touch pad
     drawLine([[phone.right + 0.016, phoneMidY, -0.16], [phone.right + 0.016, phoneMidY, 0.16]], "#cbd5e1", 3.5);
     drawLine([[phone.right + 0.012, phoneMidY, 0.48], [phone.right + 0.012, phoneMidY, 0.76]], "#64748b", 2.5);
     drawLine([[phone.right + 0.014, phoneMidY, 0.49], [phone.right + 0.014, phoneMidY, 0.75]], "#94a3b8", 1.2);
 
+    // Bottom: USB-C port cutout
     drawLine([[0 - 0.06, phoneMidY, phone.front + 0.002], [0 + 0.06, phoneMidY, phone.front + 0.002]], "#020617", 3);
 
-    const pTopLeft = project(phone.left, phoneTopY, phone.back);
-    const pBottomRight = project(phone.right, phoneTopY, phone.front);
-    const glassFinish = context.createLinearGradient(
-      pTopLeft.x, pTopLeft.y, pBottomRight.x, pBottomRight.y
-    );
-    glassFinish.addColorStop(0, "#3a4048");
-    glassFinish.addColorStop(0.3, "#4b5563");
-    glassFinish.addColorStop(0.65, "#2d333b");
-    glassFinish.addColorStop(1, "#373e47");
-    drawPolygon(topPoints, glassFinish, "#475569");
-
-    drawLine(topPoints.concat([topPoints[0]]), "#cbd5e1", 1.4);
-
-    const innerGlassPts = makeRoundedRect3D(
-      phone.left + 0.025,
-      phone.right - 0.025,
-      phone.back + 0.025,
-      phone.front - 0.025,
-      phone.radius - 0.025,
-      phoneTopY + 0.001,
-      6
-    );
-    drawLine(innerGlassPts.concat([innerGlassPts[0]]), "rgba(255, 255, 255, 0.12)", 1);
-
-    drawAppleLogo(0, 0.14, phoneTopY + 0.001);
-    drawIPhoneMarking("iPhone", 0, 0.88, phoneTopY + 0.001, 13);
-
-    const island = {
-      left: -0.58,
-      right: 0.08,
-      back: -1.18,
-      front: -0.46,
-      radius: 0.13,
-      topY: phoneTopY + 0.038,
-    };
-
-    const islandShadow = makeRoundedRect3D(
-      island.left - 0.015,
-      island.right + 0.015,
-      island.back - 0.015,
-      island.front + 0.015,
-      island.radius + 0.015,
-      phoneTopY + 0.001,
-      5
-    );
-    drawPolygon(islandShadow, "rgba(0, 0, 0, 0.48)");
-
-    const islandBasePts = makeRoundedRect3D(island.left, island.right, island.back, island.front, island.radius, phoneTopY, 5);
-    const islandTopPts = makeRoundedRect3D(island.left, island.right, island.back, island.front, island.radius, island.topY, 5);
-
-    for (let i = 0; i < islandTopPts.length; i += 1) {
-      const next = (i + 1) % islandTopPts.length;
-      drawPolygon(
-        [islandTopPts[i], islandTopPts[next], islandBasePts[next], islandBasePts[i]],
-        "#2d333b",
-        "#1e242b"
-      );
+    // 4. DUAL-SIDED RENDERING (ONE SIDE IS SCREEN, OTHER IS BACK PANEL & CAMERA)
+    let cameraLens;
+    if (!phoneFlipped) {
+      // Default Mode: Back Panel on Top, Screen on Bottom
+      if (pitch < 0) {
+        // Looking from below: draw bottom Screen
+        drawIPhoneScreen(phone, phoneBottomY);
+      }
+      cameraLens = drawIPhoneBackPanel(phone, phoneTopY);
+    } else {
+      // Scanning / Screen Mode: Screen on Top, Back Panel on Bottom
+      if (pitch < 0) {
+        // Looking from below: draw bottom Camera Back
+        cameraLens = drawIPhoneBackPanel(phone, phoneBottomY);
+      } else {
+        cameraLens = project(-0.40, phoneBottomY - 0.02, -1.00);
+      }
+      drawIPhoneScreen(phone, phoneTopY);
     }
 
-    const islandScreenCorners = [
-      project(island.left, island.topY, island.back),
-      project(island.right, island.topY, island.front),
-    ];
-    const islandGrad = context.createLinearGradient(
-      islandScreenCorners[0].x, islandScreenCorners[0].y,
-      islandScreenCorners[1].x, islandScreenCorners[1].y
-    );
-    islandGrad.addColorStop(0, "#2a3038");
-    islandGrad.addColorStop(0.5, "#38414d");
-    islandGrad.addColorStop(1, "#21262d");
-    drawPolygon(islandTopPts, islandGrad, "#64748b");
-    drawLine(islandTopPts.concat([islandTopPts[0]]), "#94a3b8", 1.2);
-
-    const lensRadius = 0.098;
-    const lensHeight = 0.024;
-
-    drawRealisticLens(-0.40, -1.00, island.topY, lensRadius, lensHeight, "wide");
-    drawRealisticLens(-0.40, -0.64, island.topY, lensRadius, lensHeight, "telephoto");
-    drawRealisticLens(-0.12, -0.82, island.topY, lensRadius, lensHeight, "ultrawide");
-
-    drawTrueToneFlash(-0.12, -1.05, island.topY);
-    drawLidarScanner(-0.12, -0.61, island.topY);
-    drawAcousticMic(-0.40, -0.48, island.topY);
-
+    // 5. Studio Lab Clamps Gripping Phone at Waist (Left & Right Flanks)
     const clampZ = 0.28;
+    // Left clamp jaw
     drawPolygon([
       [phone.left - 0.035, phoneBottomY - 0.01, clampZ - 0.12],
       [phone.left + 0.035, phoneBottomY - 0.01, clampZ - 0.12],
       [phone.left + 0.035, phoneTopY + 0.018, clampZ - 0.12],
       [phone.left - 0.035, phoneTopY + 0.018, clampZ - 0.12],
-    ], "#1e293b", "#475569");
+    ], "#1e293b");
     drawPolygon([
       [phone.left - 0.035, phoneTopY + 0.018, clampZ - 0.12],
       [phone.left + 0.035, phoneTopY + 0.018, clampZ - 0.12],
       [phone.left + 0.035, phoneTopY + 0.018, clampZ + 0.12],
       [phone.left - 0.035, phoneTopY + 0.018, clampZ + 0.12],
-    ], "#334155", "#64748b");
+    ], "#334155");
 
+    // Right clamp jaw
     drawPolygon([
       [phone.right - 0.035, phoneBottomY - 0.01, clampZ - 0.12],
       [phone.right + 0.035, phoneBottomY - 0.01, clampZ - 0.12],
       [phone.right + 0.035, phoneTopY + 0.018, clampZ - 0.12],
       [phone.right - 0.035, phoneTopY + 0.018, clampZ - 0.12],
-    ], "#1e293b", "#475569");
+    ], "#1e293b");
     drawPolygon([
       [phone.right - 0.035, phoneTopY + 0.018, clampZ - 0.12],
       [phone.right + 0.035, phoneTopY + 0.018, clampZ - 0.12],
       [phone.right + 0.035, phoneTopY + 0.018, clampZ + 0.12],
       [phone.right - 0.035, phoneTopY + 0.018, clampZ + 0.12],
-    ], "#334155", "#64748b");
+    ], "#334155");
 
-    const knobCenter = project(0, phoneTopY + 0.03, clampZ);
-    context.save();
-    context.beginPath();
-    context.arc(knobCenter.x, knobCenter.y, 5.5, 0, Math.PI * 2);
-    context.fillStyle = "#64748b";
-    context.fill();
-    context.strokeStyle = "#94a3b8";
-    context.lineWidth = 1.5;
-    context.stroke();
-    context.restore();
-
-    const cameraLens = project(-0.40, island.topY + lensHeight, -1.00);
     context.restore();
     return cameraLens;
+  }
+
+  // --- INTERACTIVE ON-CANVAS HUD TOGGLE ---
+  function drawFlipButton() {
+    const btnW = 186;
+    const btnH = 32;
+    const btnX = WIDTH - btnW - 20;
+    const btnY = 18;
+
+    context.save();
+    context.beginPath();
+    const r = 16;
+    context.moveTo(btnX + r, btnY);
+    context.lineTo(btnX + btnW - r, btnY);
+    context.arc(btnX + btnW - r, btnY + r, r, -Math.PI / 2, Math.PI / 2);
+    context.lineTo(btnX + r, btnY + btnH);
+    context.arc(btnX + r, btnY + r, r, Math.PI / 2, (3 * Math.PI) / 2);
+    context.closePath();
+
+    context.fillStyle = "rgba(15, 23, 42, 0.88)";
+    context.fill();
+    context.strokeStyle = "rgba(148, 163, 184, 0.45)";
+    context.lineWidth = 1.2;
+    context.stroke();
+
+    context.font = "bold 11px -apple-system, BlinkMacSystemFont, sans-serif";
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+
+    context.fillStyle = "#38bdf8";
+    context.fillText("⇄", btnX + 18, btnY + btnH / 2);
+
+    context.fillStyle = "#f8fafc";
+    const label = phoneFlipped ? "Flip: View Camera Back" : "Flip: View Screen & App";
+    context.fillText(label, btnX + btnW / 2 + 8, btnY + btnH / 2);
+    context.restore();
   }
 
   function addRice() {
@@ -868,6 +1088,7 @@
     drawRice(box);
     const cameraLens = drawTripodPhone(box);
     drawFlash(cameraLens);
+    drawFlipButton();
     window.requestAnimationFrame(animate);
   }
 
@@ -904,7 +1125,23 @@
     }, 220);
   }
 
+  let pointerDownPos = null;
   canvas.addEventListener("pointerdown", function (event) {
+    const rect = canvas.getBoundingClientRect();
+    const clickX = (event.clientX - rect.left) * (WIDTH / rect.width);
+    const clickY = (event.clientY - rect.top) * (HEIGHT / rect.height);
+    pointerDownPos = { x: clickX, y: clickY, time: Date.now() };
+
+    // Check if clicked the Flip button
+    const btnW = 186;
+    const btnH = 32;
+    const btnX = WIDTH - btnW - 20;
+    const btnY = 18;
+    if (clickX >= btnX && clickX <= btnX + btnW && clickY >= btnY && clickY <= btnY + btnH) {
+      phoneFlipped = !phoneFlipped;
+      return;
+    }
+
     dragging = true;
     lastPointer = { x: event.clientX, y: event.clientY };
     canvas.setPointerCapture(event.pointerId);
@@ -936,6 +1173,7 @@
     restartRice: restartRice,
     setLighting: setLighting,
     cameraFlash: cameraFlash,
+    flipPhone: function () { phoneFlipped = !phoneFlipped; return phoneFlipped; },
     resetView: function () {
       yaw = -0.65;
       pitch = 0.68;
