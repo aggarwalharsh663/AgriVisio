@@ -297,12 +297,76 @@
     return points;
   }
 
-  function drawRealisticLens(cx, cz, baseY, outerRadius, lensHeight) {
-    const segments = 24;
+  const appleLogoPath = (function () {
+    try {
+      if (typeof Path2D !== "undefined") {
+        return new Path2D(
+          "M155.8 133.3c-2.3 5.4-5.3 10.3-8.9 14.8-4.9 6.1-9.9 10.7-15 13.7-5.1 3-10.5 4.5-16.1 4.5-4 0-8.6-.9-13.8-2.8-5.2-1.9-9.8-2.8-13.7-2.8-4.3 0-9.2 1-14.7 2.9-5.5 2-10 2.9-13.6 2.9-5.9 0-11.6-1.6-17.1-4.8-5.5-3.2-10.7-8-15.6-14.4-7.4-9.6-13.2-20.9-17.4-33.8-4.2-12.9-6.3-25.2-6.3-36.9 0-15.3 4.1-28.1 12.3-38.4 8.2-10.3 18.7-15.5 31.5-15.5 4.9 0 10.4 1.2 16.4 3.7 6 2.5 9.9 3.7 11.6 3.7 1.8 0 5.8-1.2 12.1-3.7 6.3-2.5 11.8-3.7 16.6-3.7 11.3 0 21 3.9 29.1 11.7 4.7 4.5 8.2 9.6 10.6 15.3-10.1 6.1-15.1 14.6-15.1 25.5 0 9.4 3.5 17.3 10.6 23.6 7.1 6.3 15.5 9.8 25.3 10.5-2.2 6.5-5.1 13.5-8.7 21zm-28.7-109.9c0 6.6-2.4 12.8-7.3 18.7-4.8 5.8-10.8 9.5-18 11.1-.3-1.4-.4-2.8-.4-4.2 0-6.6 2.7-13.1 8-19.5 5.3-6.4 11.6-10.2 18.9-11.4.1 1.8.2 3.6.2 5.3z"
+        );
+      }
+    } catch (e) {
+      // Fallback handled
+    }
+    return null;
+  })();
+
+  function getSurfaceTransform(originX, y, originZ) {
+    const p0 = project(originX, y, originZ);
+    const px = project(originX + 1, y, originZ);
+    const pz = project(originX, y, originZ + 1);
+    return {
+      p0: p0,
+      vx: { x: px.x - p0.x, y: px.y - p0.y },
+      vz: { x: pz.x - p0.x, y: pz.y - p0.y },
+    };
+  }
+
+  function drawAppleLogo(cx, cz, y) {
+    const xform = getSurfaceTransform(cx, y, cz);
+    context.save();
+    context.transform(xform.vx.x, xform.vx.y, xform.vz.x, xform.vz.y, xform.p0.x, xform.p0.y);
+
+    const scaleFactor = 0.23 / 161.0;
+    context.scale(scaleFactor, scaleFactor);
+    context.translate(-84.1, -90.8);
+
+    const logoGrad = context.createLinearGradient(20, 20, 150, 160);
+    logoGrad.addColorStop(0, "#ffffff");
+    logoGrad.addColorStop(0.25, "#e2e8f0");
+    logoGrad.addColorStop(0.5, "#94a3b8");
+    logoGrad.addColorStop(0.75, "#cbd5e1");
+    logoGrad.addColorStop(1, "#f8fafc");
+
+    if (appleLogoPath) {
+      context.fillStyle = logoGrad;
+      context.fill(appleLogoPath);
+    } else {
+      context.beginPath();
+      context.arc(84.1, 90.8, 55, 0, Math.PI * 2);
+      context.fillStyle = logoGrad;
+      context.fill();
+    }
+    context.restore();
+  }
+
+  function drawIPhoneMarking(text, cx, cz, y, size) {
+    const xform = getSurfaceTransform(cx, y, cz);
+    context.save();
+    context.transform(xform.vx.x, xform.vx.y, xform.vz.x, xform.vz.y, xform.p0.x, xform.p0.y);
+    context.scale(0.007, 0.007);
+    context.fillStyle = "rgba(226, 232, 240, 0.35)";
+    context.font = "bold " + (size || 14) + "px -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif";
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillText(text, 0, 0);
+    context.restore();
+  }
+
+  function drawRealisticLens(cx, cz, baseY, outerRadius, lensHeight, lensType) {
+    const segments = 32;
     const topY = baseY + lensHeight;
     const glassY = topY - 0.002;
 
-    // 1. Cylindrical metallic side bezel with directional light shading
     const baseCircle = [];
     const topCircle = [];
     for (let step = 0; step < segments; step += 1) {
@@ -316,18 +380,21 @@
     for (let i = 0; i < segments; i += 1) {
       const next = (i + 1) % segments;
       const angle = (i / segments) * Math.PI * 2;
-      const dot = Math.cos(angle - 0.75);
-      const intensity = Math.round(90 + dot * 55);
-      const facetColor = "rgb(" + intensity + ", " + (intensity + 6) + ", " + (intensity + 12) + ")";
+      const nx = Math.cos(angle + Math.PI / segments);
+      const nz = Math.sin(angle + Math.PI / segments);
+      const viewDir = -nx * Math.sin(yaw) + nz * Math.cos(yaw);
+      if (viewDir < -0.15) continue;
+
+      const lightDot = nx * Math.cos(0.85 + yaw) + nz * Math.sin(0.85 + yaw);
+      const intensity = Math.round(105 + lightDot * 60);
+      const facetColor = "rgb(" + intensity + ", " + (intensity + 5) + ", " + (intensity + 11) + ")";
       drawPolygon([topCircle[i], topCircle[next], baseCircle[next], baseCircle[i]], facetColor);
     }
 
-    // 2. Polished titanium top lip
     drawPolygon(topCircle, "#94a3b8", "#cbd5e1");
-    drawLine(topCircle.concat([topCircle[0]]), "#e2e8f0", 1);
+    drawLine(topCircle.concat([topCircle[0]]), "#f1f5f9", 1.2);
 
-    // 3. Stepped inner anti-reflection baffle ring
-    const innerRadius = outerRadius * 0.78;
+    const innerRadius = outerRadius * 0.80;
     const innerCircle = [];
     for (let step = 0; step < segments; step += 1) {
       const angle = (step / segments) * Math.PI * 2;
@@ -335,7 +402,6 @@
     }
     drawPolygon(innerCircle, "#090d16", "#1e293b");
 
-    // 4. Optical glass front element with multi-coat AR tint
     const glassRadius = innerRadius * 0.88;
     const glassCircle = [];
     for (let step = 0; step < segments; step += 1) {
@@ -344,9 +410,8 @@
     }
     drawPolygon(glassCircle, "#020617");
 
-    // 5. Crescent anti-reflective coating glare (emerald & cyan flare)
     const screenCenter = project(cx, glassY, cz);
-    const screenRadius = outerRadius * 62;
+    const screenRadius = outerRadius * 78;
     context.save();
     context.beginPath();
     glassCircle.forEach(function (pt, idx) {
@@ -363,37 +428,136 @@
       screenCenter.x + screenRadius,
       screenCenter.y + screenRadius
     );
-    flare.addColorStop(0, "rgba(56, 189, 248, 0.5)");
-    flare.addColorStop(0.35, "rgba(52, 211, 153, 0.3)");
-    flare.addColorStop(0.7, "rgba(99, 102, 241, 0.15)");
-    flare.addColorStop(1, "rgba(2, 6, 23, 0.95)");
+    flare.addColorStop(0, "rgba(6, 182, 212, 0.65)");
+    flare.addColorStop(0.35, "rgba(16, 185, 129, 0.45)");
+    flare.addColorStop(0.68, "rgba(99, 102, 241, 0.25)");
+    flare.addColorStop(1, "rgba(2, 6, 23, 0.96)");
     context.fillStyle = flare;
     context.fill();
 
-    // Deep aperture pupil
+    if (lensType === "telephoto") {
+      const prismHalf = screenRadius * 0.28;
+      context.fillStyle = "#010204";
+      context.fillRect(screenCenter.x - prismHalf, screenCenter.y - prismHalf, prismHalf * 2, prismHalf * 2);
+      context.strokeStyle = "rgba(148, 163, 184, 0.3)";
+      context.lineWidth = 1;
+      context.strokeRect(screenCenter.x - prismHalf, screenCenter.y - prismHalf, prismHalf * 2, prismHalf * 2);
+    } else if (lensType === "ultrawide") {
+      context.beginPath();
+      context.arc(screenCenter.x, screenCenter.y, screenRadius * 0.44, 0, Math.PI * 2);
+      context.fillStyle = "#020408";
+      context.fill();
+      context.strokeStyle = "rgba(56, 189, 248, 0.35)";
+      context.lineWidth = 1.2;
+      context.stroke();
+    } else {
+      context.beginPath();
+      context.arc(screenCenter.x, screenCenter.y, screenRadius * 0.42, 0, Math.PI * 2);
+      context.fillStyle = "#010307";
+      context.fill();
+      context.strokeStyle = "rgba(16, 185, 129, 0.35)";
+      context.lineWidth = 1.2;
+      context.stroke();
+    }
+
     context.beginPath();
-    context.arc(screenCenter.x, screenCenter.y, screenRadius * 0.36, 0, Math.PI * 2);
-    context.fillStyle = "#020408";
+    context.arc(
+      screenCenter.x - screenRadius * 0.32,
+      screenCenter.y - screenRadius * 0.32,
+      Math.max(2, screenRadius * 0.12),
+      0,
+      Math.PI * 2
+    );
+    context.fillStyle = "rgba(255, 255, 255, 0.96)";
     context.fill();
 
-    // Specular light reflection glints
     context.beginPath();
-    context.arc(screenCenter.x - screenRadius * 0.28, screenCenter.y - screenRadius * 0.28, Math.max(1.8, screenRadius * 0.12), 0, Math.PI * 2);
-    context.fillStyle = "rgba(255, 255, 255, 0.95)";
-    context.fill();
-
-    context.beginPath();
-    context.arc(screenCenter.x + screenRadius * 0.22, screenCenter.y + screenRadius * 0.24, Math.max(1, screenRadius * 0.06), 0, Math.PI * 2);
-    context.fillStyle = "rgba(255, 255, 255, 0.45)";
+    context.arc(
+      screenCenter.x + screenRadius * 0.24,
+      screenCenter.y + screenRadius * 0.24,
+      Math.max(1.2, screenRadius * 0.07),
+      0,
+      Math.PI * 2
+    );
+    context.fillStyle = "rgba(255, 255, 255, 0.55)";
     context.fill();
 
     context.restore();
   }
 
+  function drawTrueToneFlash(cx, cz, islandY) {
+    const flashRadius = 0.046;
+    const outerPts = [];
+    for (let s = 0; s < 24; s += 1) {
+      const a = (s / 24) * Math.PI * 2;
+      outerPts.push([cx + Math.cos(a) * flashRadius, islandY + 0.005, cz + Math.sin(a) * flashRadius]);
+    }
+    drawPolygon(outerPts, "#334155", "#64748b");
+
+    const innerRadius = flashRadius * 0.82;
+    const screenCenter = project(cx, islandY + 0.006, cz);
+    const screenRad = innerRadius * 78;
+
+    context.save();
+    context.beginPath();
+    context.arc(screenCenter.x, screenCenter.y, screenRad, Math.PI, 0);
+    context.closePath();
+    context.fillStyle = "#f59e0b";
+    context.fill();
+
+    context.beginPath();
+    context.arc(screenCenter.x, screenCenter.y, screenRad, 0, Math.PI);
+    context.closePath();
+    context.fillStyle = "#f8fafc";
+    context.fill();
+
+    context.beginPath();
+    context.arc(screenCenter.x, screenCenter.y, screenRad * 0.5, 0, Math.PI * 2);
+    context.strokeStyle = "rgba(255, 255, 255, 0.7)";
+    context.lineWidth = 1;
+    context.stroke();
+
+    context.beginPath();
+    context.arc(screenCenter.x, screenCenter.y, Math.max(1.2, screenRad * 0.2), 0, Math.PI * 2);
+    context.fillStyle = "#0f172a";
+    context.fill();
+    context.restore();
+  }
+
+  function drawLidarScanner(cx, cz, islandY) {
+    const lidarRadius = 0.042;
+    const lidarPts = [];
+    for (let s = 0; s < 20; s += 1) {
+      const a = (s / 20) * Math.PI * 2;
+      lidarPts.push([cx + Math.cos(a) * lidarRadius, islandY + 0.004, cz + Math.sin(a) * lidarRadius]);
+    }
+    drawPolygon(lidarPts, "#030712", "#1e1b4b");
+    const screenCenter = project(cx, islandY + 0.005, cz);
+    const screenRad = lidarRadius * 78;
+
+    context.save();
+    context.beginPath();
+    context.arc(screenCenter.x, screenCenter.y, screenRad * 0.7, 0, Math.PI * 2);
+    context.strokeStyle = "rgba(139, 92, 246, 0.35)";
+    context.lineWidth = 1.2;
+    context.stroke();
+    context.restore();
+  }
+
+  function drawAcousticMic(cx, cz, islandY) {
+    const micRadius = 0.016;
+    const micPts = [];
+    for (let s = 0; s < 12; s += 1) {
+      const a = (s / 12) * Math.PI * 2;
+      micPts.push([cx + Math.cos(a) * micRadius, islandY + 0.004, cz + Math.sin(a) * micRadius]);
+    }
+    drawPolygon(micPts, "#020617", "#334155");
+  }
+
   function drawTripodPhone(box) {
     const mastX = box.right + 0.45;
     const mastZ = 0.05;
-    const phoneTopY = box.top + 0.08;
+    const phoneTopY = box.top + 0.09;
     const phoneBottomY = box.top;
     const phoneMidY = (phoneTopY + phoneBottomY) / 2;
 
@@ -401,41 +565,41 @@
     context.globalAlpha = 1;
     context.globalCompositeOperation = "source-over";
 
-    // 1. Heavy-duty vertical lab stand column & articulated arm
-    drawLine([[mastX, 0.15, mastZ], [mastX, phoneTopY + 0.22, mastZ]], "#1e242b", 12);
-    drawLine([[mastX, 0.15, mastZ], [mastX, phoneTopY + 0.22, mastZ]], "#475569", 8);
-    drawLine([[mastX, 0.15, mastZ], [mastX, phoneTopY + 0.22, mastZ]], "#94a3b8", 2); // Highlight line
+    drawLine([[mastX, 0.15, mastZ], [mastX, phoneTopY + 0.24, mastZ]], "#1e242b", 12);
+    drawLine([[mastX, 0.15, mastZ], [mastX, phoneTopY + 0.24, mastZ]], "#475569", 8);
+    drawLine([[mastX, 0.15, mastZ], [mastX, phoneTopY + 0.24, mastZ]], "#94a3b8", 2);
 
-    // Cast-iron base collar at chamber floor
     drawLine([[mastX - 0.25, 0.15, mastZ], [mastX + 0.25, 0.15, mastZ]], "#1e293b", 6);
     drawLine([[mastX, 0.15, mastZ - 0.25], [mastX, 0.15, mastZ + 0.25]], "#1e293b", 6);
 
-    // Articulated dual-rod boom arm extending to phone clamp
-    const armY = phoneTopY + 0.12;
+    const armY = phoneTopY + 0.14;
     drawLine([[mastX, armY, mastZ], [0.65, armY, mastZ]], "#334155", 6);
     drawLine([[mastX, armY - 0.04, mastZ], [0.65, armY - 0.04, mastZ]], "#1e293b", 4);
-    // Swivel joint collar
     drawLine([[mastX, armY + 0.03, mastZ], [mastX, armY - 0.06, mastZ]], "#64748b", 10);
-    // Articulation clamp to phone center
-    drawLine([[0.65, armY, mastZ], [0, phoneTopY + 0.03, mastZ]], "#475569", 5);
+    drawLine([[0.65, armY, mastZ], [0, phoneTopY + 0.03, mastZ + 0.22]], "#475569", 5);
 
-    // 2. Realistic Smartphone Dimensions & Rounded Rectangles
     const phone = {
-      left: -0.74,
-      right: 0.74,
+      left: -0.68,
+      right: 0.68,
       back: -1.24,
       front: 1.24,
-      radius: 0.16,
+      radius: 0.22,
     };
 
-    // Soft drop shadow cast by phone on chamber roof
-    const shadowPts = makeRoundedRect3D(phone.left - 0.02, phone.right + 0.02, phone.back - 0.02, phone.front + 0.02, phone.radius + 0.02, box.top, 5);
-    drawPolygon(shadowPts, "rgba(0, 0, 0, 0.4)");
+    const shadowPts = makeRoundedRect3D(
+      phone.left - 0.02,
+      phone.right + 0.02,
+      phone.back - 0.02,
+      phone.front + 0.02,
+      phone.radius + 0.02,
+      box.top,
+      6
+    );
+    drawPolygon(shadowPts, "rgba(0, 0, 0, 0.42)");
 
-    const bottomPoints = makeRoundedRect3D(phone.left, phone.right, phone.back, phone.front, phone.radius, phoneBottomY, 5);
-    const topPoints = makeRoundedRect3D(phone.left, phone.right, phone.back, phone.front, phone.radius, phoneTopY, 5);
+    const bottomPoints = makeRoundedRect3D(phone.left, phone.right, phone.back, phone.front, phone.radius, phoneBottomY, 6);
+    const topPoints = makeRoundedRect3D(phone.left, phone.right, phone.back, phone.front, phone.radius, phoneTopY, 6);
 
-    // 3. Metallic Chassis Side Rails (Brushed Aerospace Titanium)
     for (let i = 0; i < topPoints.length; i += 1) {
       const next = (i + 1) % topPoints.length;
       const p1 = topPoints[i];
@@ -445,142 +609,118 @@
       const nx = dz;
       const nz = -dx;
       const len = Math.hypot(nx, nz) || 1;
-      const dot = (nx / len) * 0.6 + (nz / len) * 0.8;
-      const bright = Math.round(52 + dot * 36);
-      const sideColor = "rgb(" + bright + ", " + (bright + 5) + ", " + (bright + 9) + ")";
-      drawPolygon([topPoints[i], topPoints[next], bottomPoints[next], bottomPoints[i]], sideColor, "#0f172a");
+      const unitNx = nx / len;
+      const unitNz = nz / len;
+
+      const viewDot = -unitNx * Math.sin(yaw) + unitNz * Math.cos(yaw);
+      if (viewDot < -0.1) continue;
+
+      const lightDot = unitNx * Math.cos(0.75 + yaw) + unitNz * Math.sin(0.75 + yaw);
+      const bright = Math.round(92 + lightDot * 48);
+      const sideColor = "rgb(" + bright + ", " + (bright + 5) + ", " + (bright + 10) + ")";
+      drawPolygon([topPoints[i], topPoints[next], bottomPoints[next], bottomPoints[i]], sideColor, "#334155");
     }
 
-    // Antenna Bands
-    [-0.6, 0.6].forEach(function (zPos) {
-      drawLine([[phone.left - 0.002, phoneBottomY, zPos], [phone.left - 0.002, phoneTopY, zPos]], "#090d16", 2);
-      drawLine([[phone.right + 0.002, phoneBottomY, zPos], [phone.right + 0.002, phoneTopY, zPos]], "#090d16", 2);
+    [-0.72, 0.72].forEach(function (zPos) {
+      drawLine([[phone.left - 0.002, phoneBottomY, zPos], [phone.left - 0.002, phoneTopY, zPos]], "#1e293b", 2.2);
+      drawLine([[phone.right + 0.002, phoneBottomY, zPos], [phone.right + 0.002, phoneTopY, zPos]], "#1e293b", 2.2);
     });
 
-    // Side tactile buttons
-    // Power / Sleep key on right side
-    drawLine([[phone.right + 0.016, phoneMidY, -0.15], [phone.right + 0.016, phoneMidY, 0.15]], "#94a3b8", 3.5);
-    drawLine([[phone.right + 0.016, phoneMidY, -0.15], [phone.right + 0.016, phoneMidY, 0.15]], "#cbd5e1", 1.5);
-    // Action button and Volume rockers on left side
-    drawLine([[phone.left - 0.016, phoneMidY, -0.58], [phone.left - 0.016, phoneMidY, -0.44]], "#94a3b8", 3.5);
-    drawLine([[phone.left - 0.016, phoneMidY, -0.32], [phone.left - 0.016, phoneMidY, -0.08]], "#94a3b8", 3.5);
-    drawLine([[phone.left - 0.016, phoneMidY, 0.02], [phone.left - 0.016, phoneMidY, 0.26]], "#94a3b8", 3.5);
+    drawLine([[phone.left - 0.016, phoneMidY, -0.64], [phone.left - 0.016, phoneMidY, -0.52]], "#cbd5e1", 3.5);
+    drawLine([[phone.left - 0.016, phoneMidY, -0.38], [phone.left - 0.016, phoneMidY, -0.20]], "#cbd5e1", 3.5);
+    drawLine([[phone.left - 0.016, phoneMidY, -0.08], [phone.left - 0.016, phoneMidY, 0.10]], "#cbd5e1", 3.5);
 
-    // 4. Matte AG Frosted Glass Rear Panel
-    const pTopLeft = project(phone.left, phone.topY, phone.back);
-    const pBottomRight = project(phone.right, phone.topY, phone.front);
+    drawLine([[phone.right + 0.016, phoneMidY, -0.16], [phone.right + 0.016, phoneMidY, 0.16]], "#cbd5e1", 3.5);
+    drawLine([[phone.right + 0.012, phoneMidY, 0.48], [phone.right + 0.012, phoneMidY, 0.76]], "#64748b", 2.5);
+    drawLine([[phone.right + 0.014, phoneMidY, 0.49], [phone.right + 0.014, phoneMidY, 0.75]], "#94a3b8", 1.2);
+
+    drawLine([[0 - 0.06, phoneMidY, phone.front + 0.002], [0 + 0.06, phoneMidY, phone.front + 0.002]], "#020617", 3);
+
+    const pTopLeft = project(phone.left, phoneTopY, phone.back);
+    const pBottomRight = project(phone.right, phoneTopY, phone.front);
     const glassFinish = context.createLinearGradient(
       pTopLeft.x, pTopLeft.y, pBottomRight.x, pBottomRight.y
     );
-    glassFinish.addColorStop(0, "#2c333a");
-    glassFinish.addColorStop(0.3, "#3d464f");
-    glassFinish.addColorStop(0.65, "#1e2328");
-    glassFinish.addColorStop(1, "#282e35");
-    drawPolygon(topPoints, glassFinish, "#334155");
+    glassFinish.addColorStop(0, "#3a4048");
+    glassFinish.addColorStop(0.3, "#4b5563");
+    glassFinish.addColorStop(0.65, "#2d333b");
+    glassFinish.addColorStop(1, "#373e47");
+    drawPolygon(topPoints, glassFinish, "#475569");
 
-    // Chamfered polished titanium perimeter edge highlight
-    drawLine(topPoints.concat([topPoints[0]]), "#94a3b8", 1.5);
+    drawLine(topPoints.concat([topPoints[0]]), "#cbd5e1", 1.4);
 
-    // Inner 2.5D curved glass reflection border
-    const innerGlassPts = makeRoundedRect3D(phone.left + 0.03, phone.right - 0.03, phone.back + 0.03, phone.front - 0.03, phone.radius - 0.03, phone.topY + 0.001, 5);
-    drawLine(innerGlassPts.concat([innerGlassPts[0]]), "rgba(255, 255, 255, 0.09)", 1);
+    const innerGlassPts = makeRoundedRect3D(
+      phone.left + 0.025,
+      phone.right - 0.025,
+      phone.back + 0.025,
+      phone.front - 0.025,
+      phone.radius - 0.025,
+      phoneTopY + 0.001,
+      6
+    );
+    drawLine(innerGlassPts.concat([innerGlassPts[0]]), "rgba(255, 255, 255, 0.12)", 1);
 
-    // Centered minimalist optical brand glyph (subtle reflection)
-    const logoCenter = project(0, phone.topY + 0.001, 0.18);
-    context.save();
-    context.beginPath();
-    context.arc(logoCenter.x, logoCenter.y, 7, 0, Math.PI * 2);
-    context.strokeStyle = "rgba(255, 255, 255, 0.22)";
-    context.lineWidth = 1.2;
-    context.stroke();
-    context.beginPath();
-    context.arc(logoCenter.x, logoCenter.y, 3, 0, Math.PI * 2);
-    context.fillStyle = "rgba(255, 255, 255, 0.3)";
-    context.fill();
-    context.restore();
+    drawAppleLogo(0, 0.14, phoneTopY + 0.001);
+    drawIPhoneMarking("iPhone", 0, 0.88, phoneTopY + 0.001, 13);
 
-    // 5. Elevated Squircle Camera Island (Camera Plateau)
     const island = {
-      left: -0.66,
-      right: 0.06,
-      back: -1.16,
-      front: -0.42,
-      radius: 0.11,
-      y: phoneTopY + 0.032,
+      left: -0.58,
+      right: 0.08,
+      back: -1.18,
+      front: -0.46,
+      radius: 0.13,
+      topY: phoneTopY + 0.038,
     };
 
-    // Soft drop-shadow beneath camera island on the glass back
-    const islandShadow = makeRoundedRect3D(island.left - 0.015, island.right + 0.015, island.back - 0.015, island.front + 0.015, island.radius + 0.015, phoneTopY + 0.001, 4);
-    drawPolygon(islandShadow, "rgba(0, 0, 0, 0.45)");
+    const islandShadow = makeRoundedRect3D(
+      island.left - 0.015,
+      island.right + 0.015,
+      island.back - 0.015,
+      island.front + 0.015,
+      island.radius + 0.015,
+      phoneTopY + 0.001,
+      5
+    );
+    drawPolygon(islandShadow, "rgba(0, 0, 0, 0.48)");
 
-    const islandBasePts = makeRoundedRect3D(island.left, island.right, island.back, island.front, island.radius, phoneTopY, 4);
-    const islandTopPts = makeRoundedRect3D(island.left, island.right, island.back, island.front, island.radius, island.y, 4);
+    const islandBasePts = makeRoundedRect3D(island.left, island.right, island.back, island.front, island.radius, phoneTopY, 5);
+    const islandTopPts = makeRoundedRect3D(island.left, island.right, island.back, island.front, island.radius, island.topY, 5);
 
-    // Island sides with metallic chamfer
     for (let i = 0; i < islandTopPts.length; i += 1) {
       const next = (i + 1) % islandTopPts.length;
-      drawPolygon([islandTopPts[i], islandTopPts[next], islandBasePts[next], islandBasePts[i]], "#283038", "#1e242b");
+      drawPolygon(
+        [islandTopPts[i], islandTopPts[next], islandBasePts[next], islandBasePts[i]],
+        "#2d333b",
+        "#1e242b"
+      );
     }
 
-    // Island frosted plateau surface
     const islandScreenCorners = [
-      project(island.left, island.y, island.back),
-      project(island.right, island.y, island.front),
+      project(island.left, island.topY, island.back),
+      project(island.right, island.topY, island.front),
     ];
     const islandGrad = context.createLinearGradient(
       islandScreenCorners[0].x, islandScreenCorners[0].y,
       islandScreenCorners[1].x, islandScreenCorners[1].y
     );
-    islandGrad.addColorStop(0, "#222930");
-    islandGrad.addColorStop(0.5, "#2b343d");
-    islandGrad.addColorStop(1, "#1a1f25");
-    drawPolygon(islandTopPts, islandGrad, "#475569");
-    drawLine(islandTopPts.concat([islandTopPts[0]]), "#64748b", 1.2);
+    islandGrad.addColorStop(0, "#2a3038");
+    islandGrad.addColorStop(0.5, "#38414d");
+    islandGrad.addColorStop(1, "#21262d");
+    drawPolygon(islandTopPts, islandGrad, "#64748b");
+    drawLine(islandTopPts.concat([islandTopPts[0]]), "#94a3b8", 1.2);
 
-    // 6. Triple High-End Camera Lenses
-    const lensRadius = 0.096;
-    const lensHeight = 0.022;
-    // Primary Wide Camera Lens
-    drawRealisticLens(-0.44, -0.96, island.y, lensRadius, lensHeight);
-    // Ultra-Wide Camera Lens
-    drawRealisticLens(-0.16, -0.96, island.y, lensRadius, lensHeight);
-    // Telephoto Camera Lens
-    drawRealisticLens(-0.44, -0.62, island.y, lensRadius, lensHeight);
+    const lensRadius = 0.098;
+    const lensHeight = 0.024;
 
-    // 7. TrueTone Quad-LED Flash Module
-    const flashRadius = 0.052;
-    const flashPts = [];
-    for (let s = 0; s < 18; s += 1) {
-      const a = (s / 18) * Math.PI * 2;
-      flashPts.push([-0.16 + Math.cos(a) * flashRadius, island.y + 0.005, -0.62 + Math.sin(a) * flashRadius]);
-    }
-    drawPolygon(flashPts, "#334155", "#64748b");
-    const flashInnerPts = [];
-    for (let s = 0; s < 18; s += 1) {
-      const a = (s / 18) * Math.PI * 2;
-      flashInnerPts.push([-0.16 + Math.cos(a) * (flashRadius * 0.78), island.y + 0.006, -0.62 + Math.sin(a) * (flashRadius * 0.78)]);
-    }
-    drawPolygon(flashInnerPts, "#fef3c7", "#f59e0b");
+    drawRealisticLens(-0.40, -1.00, island.topY, lensRadius, lensHeight, "wide");
+    drawRealisticLens(-0.40, -0.64, island.topY, lensRadius, lensHeight, "telephoto");
+    drawRealisticLens(-0.12, -0.82, island.topY, lensRadius, lensHeight, "ultrawide");
 
-    // 8. LiDAR Sensor & Acoustic Mic
-    const lidarRadius = 0.038;
-    const lidarPts = [];
-    for (let s = 0; s < 16; s += 1) {
-      const a = (s / 16) * Math.PI * 2;
-      lidarPts.push([-0.16 + Math.cos(a) * lidarRadius, island.y + 0.004, -0.48 + Math.sin(a) * lidarRadius]);
-    }
-    drawPolygon(lidarPts, "#020617", "#1e1b4b");
+    drawTrueToneFlash(-0.12, -1.05, island.topY);
+    drawLidarScanner(-0.12, -0.61, island.topY);
+    drawAcousticMic(-0.40, -0.48, island.topY);
 
-    const micPts = [];
-    for (let s = 0; s < 12; s += 1) {
-      const a = (s / 12) * Math.PI * 2;
-      micPts.push([-0.44 + Math.cos(a) * 0.016, island.y + 0.003, -0.48 + Math.sin(a) * 0.016]);
-    }
-    drawPolygon(micPts, "#090d16", "#334155");
-
-    // 9. Precision Studio Grip Clamps on the phone's flanks
-    const clampZ = 0.08;
-    // Left clamp jaw
+    const clampZ = 0.28;
     drawPolygon([
       [phone.left - 0.035, phoneBottomY - 0.01, clampZ - 0.12],
       [phone.left + 0.035, phoneBottomY - 0.01, clampZ - 0.12],
@@ -594,7 +734,6 @@
       [phone.left - 0.035, phoneTopY + 0.018, clampZ + 0.12],
     ], "#334155", "#64748b");
 
-    // Right clamp jaw
     drawPolygon([
       [phone.right - 0.035, phoneBottomY - 0.01, clampZ - 0.12],
       [phone.right + 0.035, phoneBottomY - 0.01, clampZ - 0.12],
@@ -608,11 +747,10 @@
       [phone.right - 0.035, phoneTopY + 0.018, clampZ + 0.12],
     ], "#334155", "#64748b");
 
-    // Central mounting thumbscrew knob
     const knobCenter = project(0, phoneTopY + 0.03, clampZ);
     context.save();
     context.beginPath();
-    context.arc(knobCenter.x, knobCenter.y, 5, 0, Math.PI * 2);
+    context.arc(knobCenter.x, knobCenter.y, 5.5, 0, Math.PI * 2);
     context.fillStyle = "#64748b";
     context.fill();
     context.strokeStyle = "#94a3b8";
@@ -620,8 +758,7 @@
     context.stroke();
     context.restore();
 
-    // Primary wide lens center as optical origin
-    const cameraLens = project(-0.44, island.y + lensHeight, -0.96);
+    const cameraLens = project(-0.40, island.topY + lensHeight, -1.00);
     context.restore();
     return cameraLens;
   }
