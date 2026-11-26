@@ -899,7 +899,25 @@
     const bottomPoints = makeRoundedRect3D(phone.left, phone.right, phone.back, phone.front, phone.radius, phoneBottomY, 6);
     const topPoints = makeRoundedRect3D(phone.left, phone.right, phone.back, phone.front, phone.radius, phoneTopY, 6);
 
-    // 3. Smooth Contoured Aerospace Titanium Chassis Rails (ZERO SPIKES)
+    // 3. FAR FACE RENDERING (Painter's algorithm: draw far face behind chassis)
+    let cameraLens;
+    if (pitch >= 0) {
+      // Viewing from ABOVE: Bottom face is further away in depth
+      if (!phoneFlipped) {
+        cameraLens = drawIPhoneBackPanel(phone, phoneBottomY, true);
+      } else {
+        drawIPhoneScreen(phone, phoneBottomY);
+      }
+    } else {
+      // Viewing from BELOW: Top face is further away in depth
+      if (!phoneFlipped) {
+        drawIPhoneScreen(phone, phoneTopY);
+      } else {
+        cameraLens = drawIPhoneBackPanel(phone, phoneTopY, false);
+      }
+    }
+
+    // 4. Smooth Contoured Aerospace Titanium Chassis Rails (ZERO SPIKES)
     // Draw continuous smooth side quads without stroked seams
     for (let i = 0; i < topPoints.length; i += 1) {
       const next = (i + 1) % topPoints.length;
@@ -946,33 +964,24 @@
     // Bottom: USB-C port cutout
     drawLine([[0 - 0.06, phoneMidY, phone.front + 0.002], [0 + 0.06, phoneMidY, phone.front + 0.002]], "#020617", 3);
 
-    // 4. DUAL-SIDED RENDERING (PITCH-AWARE SORTING):
-    // Default Mode (phoneFlipped === false):
-    // - Display Screen is on TOP (phoneTopY), facing the user with live viewfinder capturing rice!
-    // - Triple Camera is on BOTTOM (phoneBottomY), facing below into the chamber hole to capture rice!
-    let cameraLens;
-    if (!phoneFlipped) {
-      if (pitch < 0) {
-        // Viewing from BELOW: Top face is further away, bottom face is closer to viewer -> draw second
+    // 5. NEAR FACE RENDERING (Painter's algorithm: draw near face in foreground)
+    if (pitch >= 0) {
+      // Viewing from ABOVE: Top face is closer to viewer
+      if (!phoneFlipped) {
         drawIPhoneScreen(phone, phoneTopY);
-        cameraLens = drawIPhoneBackPanel(phone, phoneBottomY, true);
       } else {
-        // Viewing from ABOVE: Bottom face is further away, top face is closer to viewer -> draw second
-        cameraLens = drawIPhoneBackPanel(phone, phoneBottomY, true);
-        drawIPhoneScreen(phone, phoneTopY);
+        cameraLens = drawIPhoneBackPanel(phone, phoneTopY, false);
       }
     } else {
-      // Flipped Inspection: Display Screen on bottom, Camera on top
-      if (pitch < 0) {
-        cameraLens = drawIPhoneBackPanel(phone, phoneTopY, false);
-        drawIPhoneScreen(phone, phoneBottomY);
+      // Viewing from BELOW: Bottom face is closer to viewer
+      if (!phoneFlipped) {
+        cameraLens = drawIPhoneBackPanel(phone, phoneBottomY, true);
       } else {
         drawIPhoneScreen(phone, phoneBottomY);
-        cameraLens = drawIPhoneBackPanel(phone, phoneTopY, false);
       }
     }
 
-    // 5. Studio Lab Clamps Gripping Phone at Waist (Left & Right Flanks)
+    // 6. Studio Lab Clamps Gripping Phone at Waist (Left & Right Flanks)
     const clampZ = 0.28;
     // Left clamp jaw
     drawPolygon([
